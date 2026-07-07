@@ -15,7 +15,7 @@ import { createOutput } from "./core/output.js";
 import { createPathContext } from "./core/paths.js";
 import type { CommandContext, GlobalOptions } from "./types.js";
 
-const VERSION = "0.2.3";
+const VERSION = "0.2.4";
 
 const command = process.argv[2] ?? "help";
 const rawArgs = process.argv.slice(command === "help" ? 2 : 3);

@@ -47,7 +47,7 @@ export async function ensureProfile(options: {
         path.join(options.paths.codexHome, "config.toml"),
         options.dryRun,
       )
-    : await writeCleanConfigIfMissing(
+    : await writeCleanConfig(
         path.join(options.paths.codexHome, "config.toml"),
         options.windowsSandboxMode,
         options.dryRun,
@@ -97,20 +97,31 @@ async function setWindowsSandboxMode(
   return next === source ? "exists" : "updated";
 }
 
-async function writeCleanConfigIfMissing(
+async function writeCleanConfig(
   configPath: string,
   windowsSandboxMode: "elevated" | "unelevated" | "inherit",
   dryRun: boolean,
 ): Promise<SetupStatus> {
+  const next = buildCleanConfig(windowsSandboxMode);
   if (await pathExists(configPath)) {
-    return "exists";
+    const current = await fs.readFile(configPath, "utf8");
+    if (current === next) {
+      return "exists";
+    }
+
+    if (!dryRun) {
+      await fs.writeFile(configPath, next, "utf8");
+    }
+
+    return "updated";
   }
 
-  if (!dryRun) {
-    await fs.mkdir(path.dirname(configPath), { recursive: true });
-    await fs.writeFile(configPath, buildCleanConfig(windowsSandboxMode), "utf8");
+  if (dryRun) {
+    return "created";
   }
 
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, next, "utf8");
   return "created";
 }
 
