@@ -20,7 +20,9 @@ export async function restoreCommand(context: CommandContext, args: string[]): P
 
   const processes = await findCodexProcesses();
   if (processes.length > 0 && !context.options.force) {
-    throw new CliError("Codex appears to be running. Close Codex Desktop first, or use --force if you know it is safe.");
+    throw new CliError(
+      `Codex-related processes are running: ${processes.slice(0, 6).join("; ")}. Close them before restoring. --force only bypasses this check; it cannot unlock files that Windows is using.`,
+    );
   }
 
   const actions = await restoreClassroom(session, context.options.dryRun);

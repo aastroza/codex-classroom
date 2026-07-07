@@ -26,6 +26,8 @@ After class, close Codex Desktop and restore:
 npx codex-classroom restore
 ```
 
+Run `enter` and `restore` from a normal external terminal after closing Codex Desktop. Do not run them from inside Codex itself, because the active Codex process locks `~/.codex` on Windows.
+
 Or install globally:
 
 ```sh
@@ -87,6 +89,8 @@ This command:
 5. Moves your real Codex Desktop app state to a backup folder.
 6. Moves the classroom Desktop app state into the real Desktop state location.
 7. Opens Codex Desktop.
+
+On Windows, also close VS Code windows using the OpenAI/Codex extension, Chrome extension helpers, and any `codex.exe` app-server process. `--force` only skips the process check; it cannot unlock files that Windows is actively using.
 
 Pass extra `codex app` arguments after `--`:
 

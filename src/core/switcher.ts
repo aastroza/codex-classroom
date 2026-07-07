@@ -3,7 +3,7 @@ import path from "node:path";
 
 import type { ActiveSession, MovePlan, ProfilePaths } from "../types.js";
 import { CliError } from "./errors.js";
-import { ensureDir, movePath, pathExists, readJsonFile, writeJsonFile } from "./fs.js";
+import { ensureDir, movePath, pathExists, readJsonFile, removeInsideRoot, writeJsonFile } from "./fs.js";
 import { activeSessionPath, backupDir, isSubpath } from "./paths.js";
 
 export function createBackupId(date = new Date()): string {
@@ -106,10 +106,18 @@ export async function enterClassroom(session: ActiveSession, dryRun: boolean): P
 
   const actions: Record<string, string[]> = {};
 
-  for (const plan of movePlans(session)) {
-    actions[plan.label] = [];
-    actions[plan.label].push(`target->backup:${await movePath(plan.target, plan.backup, dryRun)}`);
-    actions[plan.label].push(`profile->target:${await movePath(plan.profile, plan.target, dryRun)}`);
+  try {
+    for (const plan of movePlans(session)) {
+      actions[plan.label] = [];
+      actions[plan.label].push(`target->backup:${await movePath(plan.target, plan.backup, dryRun)}`);
+      actions[plan.label].push(`profile->target:${await movePath(plan.profile, plan.target, dryRun)}`);
+    }
+  } catch (error) {
+    if (!(await hasAnyMovedState(session))) {
+      await clearActiveSession(session.classroomRoot, dryRun);
+      await removeInsideRoot(session.classroomRoot, backupDir(session.classroomRoot, session.backupId), dryRun);
+    }
+    throw error;
   }
 
   return actions;
@@ -121,10 +129,50 @@ export async function restoreClassroom(session: ActiveSession, dryRun: boolean):
 
   for (const plan of movePlans(session).reverse()) {
     actions[plan.label] = [];
-    actions[plan.label].push(`target->profile:${await movePath(plan.target, plan.profile, dryRun)}`);
-    actions[plan.label].push(`backup->target:${await movePath(plan.backup, plan.target, dryRun)}`);
+    actions[plan.label].push(`target->profile:${await moveTargetBackToProfile(plan, dryRun)}`);
+    actions[plan.label].push(`backup->target:${await moveBackupBackToTarget(plan, dryRun)}`);
   }
 
   await clearActiveSession(session.classroomRoot, dryRun);
   return actions;
+}
+
+async function hasAnyMovedState(session: ActiveSession): Promise<boolean> {
+  for (const plan of movePlans(session)) {
+    if (!(await pathExists(plan.target)) || !(await pathExists(plan.profile))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function moveTargetBackToProfile(plan: MovePlan, dryRun: boolean): Promise<string> {
+  const targetExists = await pathExists(plan.target);
+  const profileExists = await pathExists(plan.profile);
+
+  if (!targetExists) {
+    return "missing";
+  }
+
+  if (profileExists) {
+    return "skipped-profile-exists";
+  }
+
+  return movePath(plan.target, plan.profile, dryRun);
+}
+
+async function moveBackupBackToTarget(plan: MovePlan, dryRun: boolean): Promise<string> {
+  const backupExists = await pathExists(plan.backup);
+  const targetExists = await pathExists(plan.target);
+
+  if (!backupExists) {
+    return "missing";
+  }
+
+  if (targetExists) {
+    return "skipped-target-exists";
+  }
+
+  return movePath(plan.backup, plan.target, dryRun);
 }

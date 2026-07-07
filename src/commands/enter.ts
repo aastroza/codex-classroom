@@ -22,7 +22,9 @@ export async function enterCommand(context: CommandContext, args: string[]): Pro
 
   const processes = await findCodexProcesses();
   if (processes.length > 0 && !context.options.force) {
-    throw new CliError("Codex appears to be running. Close Codex Desktop first, or use --force if you know it is safe.");
+    throw new CliError(
+      `Codex-related processes are running: ${processes.slice(0, 6).join("; ")}. Close Codex Desktop, Codex app-server, VS Code/OpenAI extension, and browser extension helpers before entering classroom mode.`,
+    );
   }
 
   if (!context.options.dryRun && !context.options.yes) {
