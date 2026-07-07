@@ -26,6 +26,14 @@ Codex Voice ships as a CLI plus a skill. Install the CLI globally, run `codex-cl
 
 Read the guide: [Codex Voice](docs/codex-voice.md).
 
+## Thread portability
+
+Thread portability lets you save finished Codex chats as portable classroom archives.
+
+Export a good thread after preparing a lesson, then import it into a clean classroom profile when you want to show the completed work. The archive contains the thread transcript and local Codex thread indexes, but not projects, credentials, plugins, automations, or workspace files.
+
+Read the guide: [Thread portability](docs/thread-portability.md).
+
 
 ## Teaching principles
 
