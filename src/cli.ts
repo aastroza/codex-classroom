@@ -15,7 +15,7 @@ import { createOutput } from "./core/output.js";
 import { createPathContext } from "./core/paths.js";
 import type { CommandContext, GlobalOptions } from "./types.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.2";
 
 const command = process.argv[2] ?? "help";
 const rawArgs = process.argv.slice(command === "help" ? 2 : 3);
@@ -86,6 +86,9 @@ function parseGlobalOptions(args: string[]): ParsedGlobalOptions {
       "no-copy-auth": { type: "boolean" },
       "copy-config": { type: "boolean" },
       "no-copy-config": { type: "boolean" },
+      "copy-windows-sandbox": { type: "boolean" },
+      "no-copy-windows-sandbox": { type: "boolean" },
+      "windows-sandbox-mode": { type: "string" },
       force: { type: "boolean", default: false },
       "no-launch": { type: "boolean", default: false },
       yes: { type: "boolean", short: "y", default: false },
@@ -103,6 +106,10 @@ function parseGlobalOptions(args: string[]): ParsedGlobalOptions {
     desktopStateHome: parsed.values["desktop-state-home"],
     copyAuth: parsed.values["no-copy-auth"] ? false : parsed.values["copy-auth"],
     copyConfig: parsed.values["no-copy-config"] ? false : parsed.values["copy-config"],
+    copyWindowsSandbox: parsed.values["no-copy-windows-sandbox"]
+      ? false
+      : parsed.values["copy-windows-sandbox"],
+    windowsSandboxMode: parseWindowsSandboxMode(parsed.values["windows-sandbox-mode"]),
     passthrough,
     force: parsed.values.force ?? false,
     noLaunch: parsed.values["no-launch"] ?? false,
@@ -133,7 +140,7 @@ Usage:
   codex-classroom reset [profile] [options]
 
 Commands:
-  init       Create a classroom profile and copy minimal Codex auth/config
+  init       Create a classroom profile with auth and clean classroom config
   enter      Swap local Codex state to a classroom profile, then launch Desktop
   restore    Restore the real local Codex state after class
   rescue     Show active-session recovery details
@@ -149,8 +156,12 @@ Options:
   --desktop-state-home <path> Override Codex Desktop app-state path
   --copy-auth                Copy auth.json into the classroom profile
   --no-copy-auth             Do not copy auth.json
-  --copy-config              Copy config.toml into the classroom profile
-  --no-copy-config           Do not copy config.toml
+  --copy-config              Copy real config.toml instead of generating a clean one
+  --no-copy-config           Generate a clean classroom config.toml
+  --copy-windows-sandbox     Copy Windows sandbox setup assets into the classroom profile
+  --no-copy-windows-sandbox  Do not copy Windows sandbox setup assets
+  --windows-sandbox-mode <mode>
+                             Set [windows].sandbox to elevated, unelevated, or inherit
   -y, --yes                  Confirm destructive prompts
   --force                    Bypass Codex process checks
   --no-launch                Enter classroom mode without opening Codex Desktop
@@ -162,4 +173,16 @@ Options:
   -h, --help                 Show help
   -v, --version              Show version
 `);
+}
+
+function parseWindowsSandboxMode(value: string | undefined): ParsedGlobalOptions["windowsSandboxMode"] {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === "elevated" || value === "unelevated" || value === "inherit") {
+    return value;
+  }
+
+  throw new CliError("--windows-sandbox-mode must be elevated, unelevated, or inherit.");
 }

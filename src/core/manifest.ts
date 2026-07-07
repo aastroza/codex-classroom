@@ -5,7 +5,9 @@ export function defaultManifest(profileName: string): ProfileManifest {
     name: profileName,
     description: "Clean Codex classroom profile",
     copyAuth: true,
-    copyConfig: true,
+    copyConfig: false,
+    copyWindowsSandbox: false,
+    windowsSandboxMode: process.platform === "win32" ? "unelevated" : "inherit",
     features: {
       sessions: "empty",
       automations: "empty",
@@ -20,15 +22,26 @@ export function validateManifest(value: ProfileManifest): ProfileManifest {
     throw new Error("Manifest must be an object.");
   }
 
-  if (typeof value.name !== "string" || value.name.length === 0) {
+  const manifest = {
+    ...value,
+    copyWindowsSandbox: value.copyWindowsSandbox ?? false,
+    windowsSandboxMode: value.windowsSandboxMode ?? (process.platform === "win32" ? "unelevated" : "inherit"),
+  };
+
+  if (typeof manifest.name !== "string" || manifest.name.length === 0) {
     throw new Error("Manifest must include a non-empty name.");
   }
 
-  if (typeof value.copyAuth !== "boolean" || typeof value.copyConfig !== "boolean") {
-    throw new Error("Manifest copyAuth and copyConfig must be booleans.");
+  if (
+    typeof manifest.copyAuth !== "boolean" ||
+    typeof manifest.copyConfig !== "boolean" ||
+    typeof manifest.copyWindowsSandbox !== "boolean" ||
+    !["elevated", "unelevated", "inherit"].includes(manifest.windowsSandboxMode)
+  ) {
+    throw new Error("Manifest copyAuth, copyConfig, copyWindowsSandbox, and windowsSandboxMode are invalid.");
   }
 
-  const features = value.features;
+  const features = manifest.features;
   if (!features || features.sessions !== "empty" || features.automations !== "empty") {
     throw new Error("Manifest sessions and automations must currently be set to empty.");
   }
@@ -41,5 +54,5 @@ export function validateManifest(value: ProfileManifest): ProfileManifest {
     throw new Error("Manifest skills must be empty, minimal, or inherit.");
   }
 
-  return value;
+  return manifest;
 }

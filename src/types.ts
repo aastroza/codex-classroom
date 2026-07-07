@@ -1,4 +1,5 @@
 export type OutputMode = "text" | "json";
+export type SetupStatus = "copied" | "created" | "updated" | "exists" | "missing" | "skipped";
 
 export interface GlobalOptions {
   classroomRoot?: string;
@@ -6,6 +7,8 @@ export interface GlobalOptions {
   desktopStateHome?: string;
   copyAuth?: boolean;
   copyConfig?: boolean;
+  copyWindowsSandbox?: boolean;
+  windowsSandboxMode?: "elevated" | "unelevated" | "inherit";
   passthrough: string[];
   force: boolean;
   noLaunch: boolean;
@@ -22,6 +25,8 @@ export interface ProfileManifest {
   description?: string;
   copyAuth: boolean;
   copyConfig: boolean;
+  copyWindowsSandbox: boolean;
+  windowsSandboxMode: "elevated" | "unelevated" | "inherit";
   features: {
     sessions: "empty";
     automations: "empty";

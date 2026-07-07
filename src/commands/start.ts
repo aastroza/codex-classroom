@@ -17,7 +17,9 @@ export async function startCommand(context: CommandContext, args: string[]): Pro
     paths,
     realCodexHome: context.paths.realCodexHome,
     copyAuth: context.options.copyAuth ?? true,
-    copyConfig: context.options.copyConfig ?? true,
+    copyConfig: context.options.copyConfig ?? false,
+    copyWindowsSandbox: context.options.copyWindowsSandbox ?? false,
+    windowsSandboxMode: context.options.windowsSandboxMode ?? (process.platform === "win32" ? "unelevated" : "inherit"),
     dryRun: context.options.dryRun,
   });
 

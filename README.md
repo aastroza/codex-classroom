@@ -58,18 +58,38 @@ Creates a classroom profile.
 codex-classroom init intro
 ```
 
-By default it copies:
+By default it copies only:
 
 - `~/.codex/auth.json`
-- `~/.codex/config.toml`
 
-into the classroom profile. It does not copy sessions, automations, plugins, skills, local state databases, or Desktop app state.
+into the classroom profile, then writes a clean classroom `config.toml`. It does not copy sessions, automations, plugins, skills, local state databases, or Desktop app state.
 
-Skip auth or config copying:
+The clean config keeps the class profile signed in with your existing Codex account, but starts from a low-noise setup. Plugins and skills configured during class stay inside the classroom profile and are restored away from your real setup after `restore`.
+
+Skip auth copying or copy your real config instead:
 
 ```sh
 codex-classroom init intro --no-copy-auth
-codex-classroom init intro --no-copy-config
+codex-classroom init intro --copy-config
+```
+
+On Windows, the default clean config sets:
+
+```toml
+[windows]
+sandbox = "unelevated"
+```
+
+That keeps the sandbox setup visible for teaching while avoiding the elevated ACL path unless you ask for it:
+
+```sh
+codex-classroom init intro --windows-sandbox-mode elevated
+```
+
+If you want to avoid showing Windows sandbox setup and reuse the existing local sandbox support files:
+
+```sh
+codex-classroom init intro --copy-windows-sandbox
 ```
 
 ### `enter`
@@ -235,10 +255,11 @@ Profile layout:
 - It only manages profile and backup paths inside the classroom root.
 - It refuses to reset paths outside the classroom root.
 - It never prints token values.
+- It generates a clean classroom config by default instead of copying your daily config.
 - `--dry-run` is available for commands that move or launch.
 - `--json` output is intended for scripts and automation.
 
-The one sensitive operation is copying `auth.json`. That lets the classroom profile use your existing Codex login, but the copied file remains sensitive and should not be committed or shared.
+The one sensitive default operation is copying `auth.json`. That lets the classroom profile use your existing Codex login, but the copied file remains sensitive and should not be committed or shared. If you pass `--copy-config`, your real `config.toml` may also contain private paths or plugin configuration.
 
 ## Important Limitation
 

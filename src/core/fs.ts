@@ -55,6 +55,23 @@ export async function copyFileIfMissing(source: string, destination: string, dry
   return "copied";
 }
 
+export async function copyDirIfMissing(source: string, destination: string, dryRun: boolean): Promise<"copied" | "exists" | "missing"> {
+  if (!(await pathExists(source))) {
+    return "missing";
+  }
+
+  if (await pathExists(destination)) {
+    return "exists";
+  }
+
+  if (!dryRun) {
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.cp(source, destination, { recursive: true, errorOnExist: true });
+  }
+
+  return "copied";
+}
+
 export async function writeJsonFile(target: string, value: unknown, dryRun: boolean): Promise<void> {
   if (dryRun) {
     return;

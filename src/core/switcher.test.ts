@@ -29,6 +29,8 @@ test("enterClassroom and restoreClassroom swap both Codex state roots", async ()
     realCodexHome: sourceCodexHome,
     copyAuth: true,
     copyConfig: true,
+    copyWindowsSandbox: false,
+    windowsSandboxMode: "inherit",
     dryRun: false,
   });
   await fs.writeFile(path.join(profilePaths.desktopState, "classroom.txt"), "classroom desktop");

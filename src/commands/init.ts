@@ -7,7 +7,9 @@ export async function initCommand(context: CommandContext, args: string[]): Prom
   const profileName = args[0] ?? "intro";
   const paths = getProfilePaths(context.paths.classroomRoot, profileName);
   const copyAuth = context.options.copyAuth ?? true;
-  const copyConfig = context.options.copyConfig ?? true;
+  const copyConfig = context.options.copyConfig ?? false;
+  const copyWindowsSandbox = context.options.copyWindowsSandbox ?? false;
+  const windowsSandboxMode = context.options.windowsSandboxMode ?? (process.platform === "win32" ? "unelevated" : "inherit");
 
   if (args.length > 1) {
     throw new CliError("init accepts at most one profile name.");
@@ -18,6 +20,8 @@ export async function initCommand(context: CommandContext, args: string[]): Prom
     realCodexHome: context.paths.realCodexHome,
     copyAuth,
     copyConfig,
+    copyWindowsSandbox,
+    windowsSandboxMode,
     dryRun: context.options.dryRun,
   });
 
