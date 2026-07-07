@@ -1,10 +1,8 @@
-# codex-classroom
+# Codex Classroom
 
 Configuration and teaching tools for running Codex classes.
 
 `codex-classroom` collects classroom workflows that make Codex easier to teach live.
-
-Some features belong in the CLI because they need to manage local state. Others can live as Codex skills because they guide how Codex presents its work to a class.
 
 ## Classroom profiles
 
@@ -40,15 +38,3 @@ Use thread replay when you want to show the shape of a long Codex task without m
 - Leave skills empty when installing them is part of the lesson.
 - Make Codex activity easier to follow for students who cannot read every detail live.
 - Turn long agent work into reusable class material.
-
-## Development
-
-```sh
-npm install
-npm run build
-npm test
-```
-
-## License
-
-MIT
