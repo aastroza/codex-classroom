@@ -9,6 +9,7 @@ The first version runs as a local sidecar:
 - The local CLI keeps the OpenAI credential on the local server side and sends session setup to the Realtime API.
 - `codex-classroom voice say` sends classroom teaching beats into the active voice session.
 - The `codex-voice` skill teaches Codex when a cue is worth sending.
+- Optional Codex hooks record a compact thread context so the voice can answer teacher questions about what is happening.
 
 This is intentionally separate from Codex Desktop. It works the same way across desktop platforms because the only audio dependency is a modern browser.
 
@@ -95,7 +96,7 @@ The skill assumes the sidecar is already running. It should send cues with `code
 
 ## End-of-turn hook
 
-Codex can speak when a turn ends by using a `Stop` hook:
+Codex Voice can install classroom hooks:
 
 ```sh
 codex-classroom voice install-hook
@@ -103,13 +104,46 @@ codex-classroom voice install-hook
 
 Then open `/hooks` in Codex and trust the new hook. Codex requires review before non-managed command hooks run.
 
+The hook set records:
+
+- `UserPromptSubmit`: the next classroom task
+- `PostToolUse`: important tool outcomes
+- `Stop`: the end of a Codex turn
+
+The `Stop` hook also sends a short final spoken cue when the sidecar is running.
+
 The hook is temporary in the practical sense: remove it when class is over.
 
 ```sh
 codex-classroom voice uninstall-hook
 ```
 
-The hook runs `codex-classroom voice hook-stop`. That command exits successfully even when the sidecar is not running, so it should not block Codex.
+The hooks exit successfully even when the sidecar is not running, so they should not block Codex.
+
+## Thread context
+
+The context bridge stores recent classroom events in:
+
+```text
+~/.codex-classroom/voice/events.jsonl
+```
+
+The file is a bounded JSONL log. It keeps enough recent context for class without trying to archive the whole machine. Secret-looking values are redacted and long text is truncated.
+
+Inspect the current context:
+
+```sh
+codex-classroom voice context
+codex-classroom voice context 50
+```
+
+When the browser sidecar is open, it receives context events and shares them silently with the Realtime session. That lets the teacher ask questions such as:
+
+- "Codex, what are you doing right now?"
+- "Codex, what failed?"
+- "Codex, what should students notice?"
+
+The voice should answer from the last recorded context. It may not know about events that happened before hooks were trusted or while the sidecar was closed.
 
 ## Classroom guidance
 

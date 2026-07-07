@@ -11,12 +11,13 @@ import { enterCommand } from "./commands/enter.js";
 import { restoreCommand } from "./commands/restore.js";
 import { rescueCommand } from "./commands/rescue.js";
 import { voiceCommand } from "./commands/voice.js";
+import { replayCommand } from "./commands/replay.js";
 import { CliError } from "./core/errors.js";
 import { createOutput } from "./core/output.js";
 import { createPathContext } from "./core/paths.js";
 import type { CommandContext, GlobalOptions } from "./types.js";
 
-const VERSION = "0.5.1";
+const VERSION = "0.6.0";
 
 const command = process.argv[2] ?? "help";
 const rawArgs = process.argv.slice(command === "help" ? 2 : 3);
@@ -58,6 +59,8 @@ try {
     await resetCommand(context, global.positionals);
   } else if (command === "voice") {
     await voiceCommand(context, global.positionals);
+  } else if (command === "replay") {
+    await replayCommand(context, global.positionals);
   } else {
     throw new CliError(`Unknown command: ${command}`);
   }
@@ -159,6 +162,7 @@ Usage:
   codex-classroom profiles [options]
   codex-classroom reset [profile] [options]
   codex-classroom voice <start|say|pause|resume> [options]
+  codex-classroom replay export [output-dir] [options]
 
 Commands:
   init       Create a classroom profile with auth and clean classroom config
@@ -171,6 +175,7 @@ Commands:
   profiles   List known classroom profiles
   reset      Remove one profile under the classroom root
   voice      Start or control Codex Voice for classroom conversation
+  replay     Generate replay video projects from classroom context events
 
 Options:
   --classroom-root <path>    Override ~/.codex-classroom

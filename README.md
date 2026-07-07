@@ -30,9 +30,11 @@ Read the guide: [Codex Voice](docs/codex-voice.md).
 
 Thread replay turns a completed Codex thread into a video lesson.
 
-It takes a finished thread and produces a replay of what happened: the prompt, the main turns, the important changes, and the final result. This is useful when a workflow is too slow or unpredictable to run live in class.
+It uses the same context bridge that powers Codex Voice. As Codex works, classroom hooks record a compact event stream: prompts, important tool results, voice cues, and turn completions. Replay exports that stream as a Remotion project so you can preview, edit, and render a video.
 
-Use thread replay when you want to show the shape of a long Codex task without making students wait through the whole run. For example, a `goal` workflow can be recorded once, edited into the important moments, and reused as teaching material.
+Use thread replay when you want to show the shape of a long Codex task without making students wait through the whole run. For example, a `goal` workflow can be recorded once and reused as teaching material.
+
+Read the guide: [Thread replay](docs/thread-replay.md).
 
 ## Teaching principles
 

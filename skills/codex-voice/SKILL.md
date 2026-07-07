@@ -37,6 +37,12 @@ Install the end-of-turn hook only when the user asks Codex to speak after every 
 codex-classroom voice install-hook
 ```
 
+Inspect recorded thread context when the teacher asks what the voice knows:
+
+```sh
+codex-classroom voice context
+```
+
 Send a cue:
 
 ```sh
@@ -73,6 +79,8 @@ Send a cue for every teaching beat:
 Routine commands can stay silent when they do not change the story: simple file reads, directory listing, repeated retries, or mechanical formatting.
 
 Coverage criterion: every meaningful phase has at least one cue. If you work through several tool calls without speaking, send a `note` cue at the next transition that summarizes the progress.
+
+The cues also become classroom context for teacher questions and replay videos. Make each cue useful as a future event: include the observable action, the reason it matters, and the evidence students should watch.
 
 ## Cue Style
 

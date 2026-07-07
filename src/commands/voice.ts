@@ -9,6 +9,15 @@ import type { CommandContext } from "../types.js";
 import { CliError } from "../core/errors.js";
 import { pathExists } from "../core/fs.js";
 import {
+  appendVoiceContextEvent,
+  buildThreadBrief,
+  normalizeHookContext,
+  parseHookPayload,
+  readStdinText,
+  readVoiceContextEvents,
+  type VoiceContextEvent,
+} from "../core/voice-context.js";
+import {
   DEFAULT_VOICE_API_KEY_ENV,
   DEFAULT_VOICE_HOST,
   DEFAULT_VOICE_LANGUAGE,
@@ -34,6 +43,9 @@ interface VoiceOptions {
 const CODEX_VOICE_SKILL_NAME = "codex-voice";
 const CODEX_VOICE_HOOK_STATUS = "Speaking Codex Voice turn status";
 const CODEX_VOICE_HOOK_COMMAND = "codex-classroom voice hook-stop";
+const CODEX_VOICE_CONTEXT_HOOK_STATUS = "Recording Codex Voice context";
+const CODEX_VOICE_USER_PROMPT_HOOK_COMMAND = "codex-classroom voice hook-event UserPromptSubmit";
+const CODEX_VOICE_POST_TOOL_HOOK_COMMAND = "codex-classroom voice hook-event PostToolUse";
 
 export async function voiceCommand(context: CommandContext, args: string[]): Promise<void> {
   const action = args[0] ?? "help";
@@ -55,7 +67,17 @@ export async function voiceCommand(context: CommandContext, args: string[]): Pro
   }
 
   if (action === "hook-stop") {
-    await sendHookStopCue(options);
+    await sendHookStopCue(context, options);
+    return;
+  }
+
+  if (action === "hook-event") {
+    await recordHookEvent(context, options, args[1]);
+    return;
+  }
+
+  if (action === "context") {
+    await printVoiceContext(context, args.slice(1));
     return;
   }
 
@@ -147,30 +169,20 @@ async function voiceDoctor(context: CommandContext, options: VoiceOptions): Prom
 async function installVoiceHook(context: CommandContext): Promise<void> {
   const hooksPath = path.join(context.paths.realCodexHome, "hooks.json");
   const config = await readHooksConfig(hooksPath);
-  const stopHooks = ensureHookGroups(config, "Stop");
-  const group = stopHooks[0] ?? { hooks: [] };
-  if (stopHooks.length === 0) {
-    stopHooks.push(group);
-  }
-
-  const alreadyInstalled = group.hooks.some((hook) => hook.type === "command" && hook.command === CODEX_VOICE_HOOK_COMMAND);
-  if (!alreadyInstalled) {
-    group.hooks.push({
-      type: "command",
-      command: CODEX_VOICE_HOOK_COMMAND,
-      timeout: 10,
-      statusMessage: CODEX_VOICE_HOOK_STATUS,
-    });
-  }
+  const installed = [
+    ensureCommandHook(config, "Stop", CODEX_VOICE_HOOK_COMMAND, CODEX_VOICE_HOOK_STATUS),
+    ensureCommandHook(config, "UserPromptSubmit", CODEX_VOICE_USER_PROMPT_HOOK_COMMAND, CODEX_VOICE_CONTEXT_HOOK_STATUS),
+    ensureCommandHook(config, "PostToolUse", CODEX_VOICE_POST_TOOL_HOOK_COMMAND, CODEX_VOICE_CONTEXT_HOOK_STATUS, "*"),
+  ];
 
   await writeHooksConfig(hooksPath, config);
 
   if (context.options.json) {
-    context.output.json({ ok: true, hooksPath, installed: !alreadyInstalled });
+    context.output.json({ ok: true, hooksPath, installed: installed.filter(Boolean).length });
     return;
   }
 
-  context.output.info(alreadyInstalled ? "Codex Voice Stop hook already installed" : "Installed Codex Voice Stop hook");
+  context.output.info(installed.some(Boolean) ? "Installed Codex Voice context hooks" : "Codex Voice context hooks already installed");
   context.output.info(`hooks.json: ${hooksPath}`);
   context.output.info("Open /hooks in Codex and trust the new hook before expecting it to run.");
 }
@@ -183,16 +195,23 @@ async function uninstallVoiceHook(context: CommandContext): Promise<void> {
   }
 
   const config = await readHooksConfig(hooksPath);
-  const groups = config.hooks.Stop ?? [];
+  const commands = new Set([
+    CODEX_VOICE_HOOK_COMMAND,
+    CODEX_VOICE_USER_PROMPT_HOOK_COMMAND,
+    CODEX_VOICE_POST_TOOL_HOOK_COMMAND,
+  ]);
   let removed = 0;
-  for (const group of groups) {
-    const before = group.hooks.length;
-    group.hooks = group.hooks.filter((hook) => !(hook.type === "command" && hook.command === CODEX_VOICE_HOOK_COMMAND));
-    removed += before - group.hooks.length;
-  }
-  config.hooks.Stop = groups.filter((group) => group.hooks.length > 0);
-  if (config.hooks.Stop.length === 0) {
-    delete config.hooks.Stop;
+  for (const eventName of Object.keys(config.hooks)) {
+    const groups = config.hooks[eventName] ?? [];
+    for (const group of groups) {
+      const before = group.hooks.length;
+      group.hooks = group.hooks.filter((hook) => !(hook.type === "command" && commands.has(hook.command)));
+      removed += before - group.hooks.length;
+    }
+    config.hooks[eventName] = groups.filter((group) => group.hooks.length > 0);
+    if (config.hooks[eventName].length === 0) {
+      delete config.hooks[eventName];
+    }
   }
 
   await writeHooksConfig(hooksPath, config);
@@ -213,13 +232,16 @@ async function startVoice(context: CommandContext, options: VoiceOptions): Promi
 
   const clients = new Set<ServerResponse>();
   const cueHistory: VoiceCue[] = [];
+  const contextHistory = await readVoiceContextEvents(context.paths.classroomRoot, 40);
   const server = http.createServer(async (request, response) => {
     try {
       await routeRequest(request, response, {
         options,
+        classroomRoot: context.paths.classroomRoot,
         apiKey,
         clients,
         cueHistory,
+        contextHistory,
       });
     } catch (error) {
       sendJson(response, 500, {
@@ -253,9 +275,11 @@ async function routeRequest(
   response: ServerResponse,
   state: {
     options: VoiceOptions;
+    classroomRoot: string;
     apiKey: string;
     clients: Set<ServerResponse>;
     cueHistory: VoiceCue[];
+    contextHistory: VoiceContextEvent[];
   },
 ): Promise<void> {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -274,6 +298,9 @@ async function routeRequest(
     response.write(`event: ready\ndata: ${JSON.stringify({ ok: true })}\n\n`);
     for (const cue of state.cueHistory.slice(-20)) {
       response.write(`event: cue\ndata: ${JSON.stringify(cue)}\n\n`);
+    }
+    for (const event of state.contextHistory.slice(-30)) {
+      response.write(`event: context\ndata: ${JSON.stringify(event)}\n\n`);
     }
     state.clients.add(response);
     request.on("close", () => {
@@ -299,11 +326,40 @@ async function routeRequest(
   if (request.method === "POST" && url.pathname === "/cue") {
     const payload = await readJson(request);
     const cue = normalizeCue(payload);
+    const event = await appendVoiceContextEvent(state.classroomRoot, {
+      source: "cue",
+      kind: cue.kind,
+      title: `Voice cue: ${cue.kind}`,
+      summary: cue.text || cue.kind,
+      at: cue.at,
+    });
     state.cueHistory.push(cue);
+    state.contextHistory.push(event);
     for (const client of state.clients) {
       client.write(`event: cue\ndata: ${JSON.stringify(cue)}\n\n`);
+      client.write(`event: context\ndata: ${JSON.stringify(event)}\n\n`);
     }
     sendJson(response, 200, { ok: true, cue });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/context-event") {
+    const event = normalizeContextEvent(await readJson(request));
+    state.contextHistory.push(event);
+    for (const client of state.clients) {
+      client.write(`event: context\ndata: ${JSON.stringify(event)}\n\n`);
+    }
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/context") {
+    const events = await readVoiceContextEvents(state.classroomRoot, 40);
+    sendJson(response, 200, {
+      ok: true,
+      events,
+      brief: buildThreadBrief(events),
+    });
     return;
   }
 
@@ -394,13 +450,15 @@ async function sendCue(context: CommandContext, options: VoiceOptions, args: str
   }
 }
 
-async function sendHookStopCue(options: VoiceOptions): Promise<void> {
+async function sendHookStopCue(context: CommandContext, options: VoiceOptions): Promise<void> {
+  const event = await appendHookEvent(context, options, "Stop");
   const cue: VoiceCue = {
     kind: "verified",
     text: "I finished my response and I am ready for the next instruction.",
     at: new Date().toISOString(),
   };
 
+  await notifyContextEvent(options, event);
   await fetch(`http://${options.host}:${options.port}/cue`, {
     method: "POST",
     headers: {
@@ -409,6 +467,59 @@ async function sendHookStopCue(options: VoiceOptions): Promise<void> {
     body: JSON.stringify(cue),
   }).catch(() => {
     // Hooks must not block Codex if the sidecar is not running.
+  });
+}
+
+async function recordHookEvent(context: CommandContext, options: VoiceOptions, eventName: string | undefined): Promise<void> {
+  if (!eventName) {
+    throw new CliError("voice hook-event requires a Codex hook event name.");
+  }
+  const event = await appendHookEvent(context, options, eventName);
+  await notifyContextEvent(options, event);
+
+  if (context.options.json) {
+    context.output.json({ ok: true, event });
+  }
+}
+
+async function appendHookEvent(
+  context: CommandContext,
+  _options: VoiceOptions,
+  eventName: string,
+): Promise<VoiceContextEvent> {
+  const stdin = await readStdinText();
+  const payload = parseHookPayload(stdin);
+  const normalized = normalizeHookContext({
+    eventName,
+    payload,
+    cwd: process.cwd(),
+  });
+  return await appendVoiceContextEvent(context.paths.classroomRoot, normalized);
+}
+
+async function printVoiceContext(context: CommandContext, args: string[]): Promise<void> {
+  const limit = parseContextLimit(args[0]);
+  const events = await readVoiceContextEvents(context.paths.classroomRoot, limit);
+  const brief = buildThreadBrief(events);
+
+  if (context.options.json) {
+    context.output.json({ ok: true, events, brief });
+    return;
+  }
+
+  context.output.info(`Codex Voice context: ${events.length} event(s)`);
+  context.output.info(brief);
+}
+
+async function notifyContextEvent(options: VoiceOptions, event: VoiceContextEvent): Promise<void> {
+  await fetch(`http://${options.host}:${options.port}/context-event`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(event),
+  }).catch(() => {
+    // Context hooks should keep working even when the sidecar is not open.
   });
 }
 
@@ -439,6 +550,17 @@ function normalizeCue(payload: unknown): VoiceCue {
   }
 
   return { kind, text, at };
+}
+
+function normalizeContextEvent(payload: unknown): VoiceContextEvent {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Context event payload must be an object.");
+  }
+  const raw = payload as VoiceContextEvent;
+  if (raw.schemaVersion !== 1 || !raw.id || !raw.at || !raw.kind || !raw.summary) {
+    throw new Error("Context event payload is invalid.");
+  }
+  return raw;
 }
 
 async function readText(request: IncomingMessage): Promise<string> {
@@ -561,25 +683,39 @@ async function checkVoiceHook(codexHome: string): Promise<VoiceDoctorCheck> {
   const hooksPath = path.join(codexHome, "hooks.json");
   if (!(await pathExists(hooksPath))) {
     return {
-      id: "stop-hook",
+      id: "context-hooks",
       status: "warn",
-      summary: "Codex Voice Stop hook is not installed",
+      summary: "Codex Voice context hooks are not installed",
       fix: "Run codex-classroom voice install-hook, then review it with /hooks in Codex.",
     };
   }
 
   const config = await readHooksConfig(hooksPath);
-  const installed = (config.hooks.Stop ?? []).some((group) =>
-    group.hooks.some((hook) => hook.type === "command" && hook.command === CODEX_VOICE_HOOK_COMMAND),
-  );
-  if (installed) {
-    return { id: "stop-hook", status: "ok", summary: `Codex Voice Stop hook is configured in ${hooksPath}` };
+  const expected = [
+    CODEX_VOICE_HOOK_COMMAND,
+    CODEX_VOICE_USER_PROMPT_HOOK_COMMAND,
+    CODEX_VOICE_POST_TOOL_HOOK_COMMAND,
+  ];
+  const installed = new Set<string>();
+  for (const groups of Object.values(config.hooks)) {
+    for (const group of groups) {
+      for (const hook of group.hooks) {
+        if (hook.type === "command") {
+          installed.add(hook.command);
+        }
+      }
+    }
+  }
+
+  const missing = expected.filter((command) => !installed.has(command));
+  if (missing.length === 0) {
+    return { id: "context-hooks", status: "ok", summary: `Codex Voice context hooks are configured in ${hooksPath}` };
   }
 
   return {
-    id: "stop-hook",
+    id: "context-hooks",
     status: "warn",
-    summary: "Codex Voice Stop hook is not installed",
+    summary: `Codex Voice context hooks are incomplete (${missing.length} missing)`,
     fix: "Run codex-classroom voice install-hook, then review it with /hooks in Codex.",
   };
 }
@@ -625,6 +761,47 @@ async function writeHooksConfig(hooksPath: string, config: HooksConfig): Promise
 function ensureHookGroups(config: HooksConfig, event: string): HookGroup[] {
   config.hooks[event] ??= [];
   return config.hooks[event];
+}
+
+function ensureCommandHook(
+  config: HooksConfig,
+  event: string,
+  command: string,
+  statusMessage: string,
+  matcher?: string,
+): boolean {
+  const groups = ensureHookGroups(config, event);
+  const group = groups.find((candidate) => (candidate.matcher ?? "") === (matcher ?? "")) ?? {
+    ...(matcher ? { matcher } : {}),
+    hooks: [],
+  };
+  if (!groups.includes(group)) {
+    groups.push(group);
+  }
+
+  const alreadyInstalled = group.hooks.some((hook) => hook.type === "command" && hook.command === command);
+  if (alreadyInstalled) {
+    return false;
+  }
+
+  group.hooks.push({
+    type: "command",
+    command,
+    timeout: 10,
+    statusMessage,
+  });
+  return true;
+}
+
+function parseContextLimit(value: string | undefined): number {
+  if (value === undefined) {
+    return 20;
+  }
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    throw new CliError("voice context limit must be an integer between 1 and 200.");
+  }
+  return limit;
 }
 
 function packageRoot(): string {
@@ -721,6 +898,12 @@ function renderVoicePage(options: VoiceOptions): string {
       <h2>Cues</h2>
       <div id="log" class="log"></div>
     </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>Thread context</h2>
+      <p id="contextStatus">Waiting for Codex hook events.</p>
+      <div id="contextLog" class="log"></div>
+    </section>
   </main>
   <script>
     const config = ${config};
@@ -728,6 +911,7 @@ function renderVoicePage(options: VoiceOptions): string {
     let dc;
     let micTrack;
     let connected = false;
+    const pendingContext = [];
 
     const statusDot = document.getElementById("statusDot");
     const statusText = document.getElementById("statusText");
@@ -739,6 +923,8 @@ function renderVoicePage(options: VoiceOptions): string {
     const resumeButton = document.getElementById("resumeButton");
     const manualCue = document.getElementById("manualCue");
     const log = document.getElementById("log");
+    const contextStatus = document.getElementById("contextStatus");
+    const contextLog = document.getElementById("contextLog");
     document.getElementById("sessionConfig").textContent = config.model + " - " + config.voice + " - " + config.language;
 
     function setStatus(text, mode) {
@@ -773,6 +959,7 @@ function renderVoicePage(options: VoiceOptions): string {
       dc.addEventListener("open", () => {
         setStatus("Live", "live");
         setConnected(true);
+        flushPendingContext();
       });
       dc.addEventListener("close", () => {
         setStatus("Disconnected", "");
@@ -839,6 +1026,40 @@ function renderVoicePage(options: VoiceOptions): string {
       }));
     }
 
+    function sendContextToRealtime(event) {
+      appendContext(event);
+      if (!connected || !dc || dc.readyState !== "open") {
+        pendingContext.push(event);
+        while (pendingContext.length > 30) pendingContext.shift();
+        return;
+      }
+      injectContextToRealtime(event);
+    }
+
+    function injectContextToRealtime(event) {
+      const prompt = "Thread context update for future teacher questions. Store this silently and do not speak now.\\n" +
+        event.kind + ": " + event.title + "\\n" +
+        event.summary +
+        (event.toolName ? "\\nTool: " + event.toolName : "") +
+        (event.status ? "\\nStatus: " + event.status : "");
+
+      dc.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: prompt }],
+        },
+      }));
+    }
+
+    function flushPendingContext() {
+      const queued = pendingContext.splice(0, pendingContext.length);
+      for (const event of queued) {
+        injectContextToRealtime(event);
+      }
+    }
+
     function cueLabel(kind) {
       return {
         note: "Classroom note",
@@ -859,6 +1080,22 @@ function renderVoicePage(options: VoiceOptions): string {
       body.textContent = text;
       row.append(meta, body);
       log.prepend(row);
+    }
+
+    function appendContext(event) {
+      contextStatus.textContent = "Recent context is being shared silently with Codex Voice.";
+      const row = document.createElement("div");
+      row.className = "cue";
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = new Date(event.at).toLocaleTimeString() + " - " + event.kind;
+      const body = document.createElement("div");
+      body.textContent = event.title + ": " + event.summary;
+      row.append(meta, body);
+      contextLog.prepend(row);
+      while (contextLog.children.length > 12) {
+        contextLog.removeChild(contextLog.lastChild);
+      }
     }
 
     async function postCue(kind, text) {
@@ -891,6 +1128,7 @@ function renderVoicePage(options: VoiceOptions): string {
 
     const events = new EventSource("/events");
     events.addEventListener("cue", (event) => sendCueToRealtime(JSON.parse(event.data)));
+    events.addEventListener("context", (event) => sendContextToRealtime(JSON.parse(event.data)));
   </script>
 </body>
 </html>`;
@@ -904,6 +1142,7 @@ Usage:
   codex-classroom voice say [kind] <message> [options]
   codex-classroom voice pause [options]
   codex-classroom voice resume [options]
+  codex-classroom voice context [limit] [options]
   codex-classroom voice doctor [options]
   codex-classroom voice install-skill [options]
   codex-classroom voice install-hook [options]
