@@ -1,6 +1,6 @@
 {
   "name": "codex-classroom",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Teaching support toolkit for Codex classes.",
   "type": "module",
   "bin": {

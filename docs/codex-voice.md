@@ -7,7 +7,7 @@ The first version runs as a local sidecar:
 - `codex-classroom voice start` opens a local browser console.
 - The browser captures the teacher's microphone and plays Codex's audio through WebRTC.
 - The local CLI keeps the OpenAI credential on the local server side and sends session setup to the Realtime API.
-- `codex-classroom voice say` sends short classroom cues into the active voice session.
+- `codex-classroom voice say` sends classroom teaching beats into the active voice session.
 - The `codex-voice` skill teaches Codex when a cue is worth sending.
 
 This is intentionally separate from Codex Desktop. It works the same way across desktop platforms because the only audio dependency is a modern browser.
@@ -89,7 +89,7 @@ codex-classroom voice resume
 
 The skill lives at [skills/codex-voice/SKILL.md](../skills/codex-voice/SKILL.md).
 
-Install it with `codex-classroom voice install-skill` when you want Codex to send cues automatically during a teaching run. The skill keeps Codex's spoken comments sparse: it should mark meaningful transitions, not every command.
+Install it with `codex-classroom voice install-skill` when you want Codex to send cues automatically during a teaching run. The skill treats spoken comments as teaching beats: it should cover meaningful phases with enough context for students who cannot read the screen quickly.
 
 The skill assumes the sidecar is already running. It should send cues with `codex-classroom voice say`; it should not start the sidecar from inside an ordinary task.
 
@@ -113,13 +113,15 @@ The hook runs `codex-classroom voice hook-stop`. That command exits successfully
 
 ## Classroom guidance
 
-Use Codex Voice for moments students might miss:
+Use Codex Voice for teaching beats students might miss:
 
 - the intent before a multi-step change
+- the reason a strategy changed
 - the result of a failing or passing test
 - a meaningful file or behavior change
 - a blocker worth explaining out loud
 - evidence students should inspect on screen
+- a shipping milestone such as a commit or package check
 
 Avoid spoken comments for:
 

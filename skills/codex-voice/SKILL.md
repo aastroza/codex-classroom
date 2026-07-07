@@ -7,7 +7,9 @@ description: "Use when teaching a live Codex class with Codex Voice: the user wa
 
 Codex Voice is a classroom sidecar. It lets Codex speak as itself while the teacher runs a live demo.
 
-Your job is to send sparse first-person voice cues that help students follow observable work.
+Your job is to send first-person teaching beats that help students follow observable work.
+
+A teaching beat is a short spoken update at a meaningful transition. It tells the class what you are doing, why it matters, and what evidence or result to notice.
 
 ## Commands
 
@@ -56,40 +58,49 @@ Cue kinds:
 - `verified`
 - `note`
 
-## Cue Decision
+## Teaching beat coverage
 
 Before sending a cue, classify the moment.
 
-Send a cue when the class benefits from hearing a transition:
+Send a cue for every teaching beat:
 
-- `started`: you are beginning meaningful multi-step work.
-- `changed`: you made a user-visible change.
-- `blocked`: verification or progress is blocked in a way worth teaching.
-- `verified`: a check passed or failed and the result matters.
-- `note`: the teacher asks you to say something, or students should inspect evidence on screen.
+- `started`: you are beginning a new phase such as implementation or verification.
+- `changed`: you made or are about to make a user-visible change in behavior or teaching material.
+- `blocked`: an assumption failed, an API rejected a request, a command failed, a setup dependency is missing, or progress needs a decision.
+- `verified`: a check passed or failed, a manual test confirms behavior, a package/build result matters, or a commit/push completed.
+- `note`: the teacher asks you to explain, students should inspect evidence on screen, or you are switching strategy.
 
-Skip the cue when the moment is routine: reading files, listing directories, running an obvious command, repeating a retry, or producing private reasoning.
+Routine commands can stay silent when they do not change the story: simple file reads, directory listing, repeated retries, or mechanical formatting.
 
-Completion criterion: for each possible cue, either send one command or decide that the moment is routine and stay silent.
+Coverage criterion: every meaningful phase has at least one cue. If you work through several tool calls without speaking, send a `note` cue at the next transition that summarizes the progress.
 
 ## Cue Style
 
 Write cues as Codex speaking in first person.
 
-Use one short sentence. Mention observable work, not internal reasoning.
+Use one sentence, or two short clauses. Include enough context for students who cannot read the screen quickly.
+
+Prefer this shape:
+
+```text
+I am <doing X> because <class-relevant reason>; watch <evidence/result>.
+```
+
+Keep private reasoning out of the cue. Explain observable strategy and evidence.
 
 Good cues:
 
 ```sh
-codex-classroom voice say started "I am reading the command path before editing."
-codex-classroom voice say changed "I added the voice sidecar and updated the skill."
-codex-classroom voice say verified "The TypeScript check passed."
+codex-classroom voice say started "I am checking the CLI command path before editing so the class can see where voice setup lives."
+codex-classroom voice say changed "I added install and doctor commands; watch how the skill now has a reproducible setup path."
+codex-classroom voice say blocked "The API rejected the response event shape, so I am simplifying it to the documented Realtime event."
+codex-classroom voice say verified "The TypeScript check and package dry run passed, so the shipped CLI includes the voice files."
 ```
 
 Weak cues:
 
 ```sh
-codex-classroom voice say note "I am using Get-Content on src/cli.ts and thinking about the parser."
+codex-classroom voice say note "I am reading a file."
 codex-classroom voice say note "Here is the whole error output: ..."
 ```
 
