@@ -25,7 +25,8 @@ test("buildCleanConfig creates a portable classroom config by default", () => {
   assert.match(config, /sandbox_mode = "workspace-write"/);
   assert.match(config, /\[features\]/);
   assert.match(config, /skills = false/);
-  assert.match(config, /plugins = false/);
+  assert.match(config, /plugins = true/);
+  assert.match(config, /computer_use = true/);
   assert.doesNotMatch(config, /\[windows\]/);
 });
 

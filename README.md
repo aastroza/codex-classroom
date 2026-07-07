@@ -64,7 +64,7 @@ By default it copies only:
 
 into the classroom profile, then writes a sterile classroom `config.toml`. It does not copy sessions, automations, plugins, skills, local state databases, or Desktop app state.
 
-The sterile config keeps the class profile signed in with your existing Codex account, but starts from a low-noise setup with skills, plugins, browser tools, computer-use tools, and app connectors disabled. The CLI reapplies this sterile config on every `init` and `enter` unless you use `--copy-config`, so app-generated config changes from a previous class do not leak into the next class start.
+The classroom config keeps the class profile signed in with your existing Codex account, but starts from a low-noise setup without copying your personal skills, plugin installs, sessions, or automations. Plugin, browser, computer-use, and app connector capabilities stay enabled so you can configure them live during class. The CLI reapplies this config on every `init` and `enter` unless you use `--copy-config`, so app-generated config changes from a previous class do not leak into the next class start.
 
 Skip auth copying or copy your real config instead:
 
@@ -90,7 +90,7 @@ If you want to avoid showing Windows sandbox setup and reuse the existing local 
 codex-classroom init intro --copy-windows-sandbox
 ```
 
-Codex may still generate caches, sqlite files, and bundled system folders inside the classroom profile after first launch. Those generated files stay in the profile and do not contaminate your real Codex state.
+Codex may still generate caches, sqlite files, bundled plugin support files, and system folders inside the classroom profile after first launch. Those generated files stay in the profile and do not contaminate your real Codex state.
 
 To copy your daily config, including your existing plugins and skills:
 

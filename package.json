@@ -1,6 +1,6 @@
 {
   "name": "codex-classroom",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Launch Codex Desktop with clean, local classroom profiles.",
   "type": "module",
   "bin": {
