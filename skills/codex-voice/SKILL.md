@@ -1,25 +1,36 @@
 ---
 name: "codex-voice"
-description: "Use during live Codex classroom demos to let Codex speak concise first-person cues through codex-classroom."
+description: "Use when teaching a live Codex class with Codex Voice: the user wants Codex to speak as itself, send voice cues, pause/resume spoken comments, or explain work aloud through codex-classroom."
 ---
 
 # Codex Voice
 
-Use this skill when the teacher wants Codex to speak as itself during a live class.
+Codex Voice is a classroom sidecar. It lets Codex speak as itself while the teacher runs a live demo.
 
-Codex Voice is a sidecar started with:
+Your job is to send sparse first-person voice cues that help students follow observable work.
+
+## Commands
+
+Start the sidecar only when the user explicitly asks for it:
 
 ```sh
 codex-classroom voice start
 ```
 
-Send cues with:
+Send a cue:
 
 ```sh
-codex-classroom voice say <kind> "<short first-person classroom update>"
+codex-classroom voice say <kind> "<short first-person update>"
 ```
 
-Supported cue kinds:
+Pause or resume:
+
+```sh
+codex-classroom voice pause
+codex-classroom voice resume
+```
+
+Cue kinds:
 
 - `started`
 - `changed`
@@ -27,50 +38,67 @@ Supported cue kinds:
 - `verified`
 - `note`
 
-Pause or resume Codex Voice:
+## Cue Decision
 
-```sh
-codex-classroom voice pause
-codex-classroom voice resume
-```
+Before sending a cue, classify the moment.
 
-## When to Send a Cue
+Send a cue when the class benefits from hearing a transition:
 
-Send a cue only when it helps students follow your work:
+- `started`: you are beginning meaningful multi-step work.
+- `changed`: you made a user-visible change.
+- `blocked`: verification or progress is blocked in a way worth teaching.
+- `verified`: a check passed or failed and the result matters.
+- `note`: the teacher asks you to say something, or students should inspect evidence on screen.
 
-- before a meaningful multi-step action
-- after a user-visible change
-- when a command fails in a way worth teaching
-- when verification passes or fails
-- when the class should look at evidence on screen
+Skip the cue when the moment is routine: reading files, listing directories, running an obvious command, repeating a retry, or producing private reasoning.
 
-Do not send cues for routine file reads, obvious shell commands, repeated retries, or private reasoning.
-
-Never include credentials or secrets. Summarize command output instead of reading it aloud.
+Completion criterion: for each possible cue, either send one command or decide that the moment is routine and stay silent.
 
 ## Cue Style
 
-Write one short first-person sentence in English for the cue text. Codex Voice will adapt it to the configured spoken language.
+Write cues as Codex speaking in first person.
+
+Use one short sentence. Mention observable work, not internal reasoning.
 
 Good cues:
 
 ```sh
 codex-classroom voice say started "I am reading the command path before editing."
-codex-classroom voice say changed "I added the voice sidecar and a skill for sparse cues."
-codex-classroom voice say verified "The TypeScript check and test suite passed."
+codex-classroom voice say changed "I added the voice sidecar and updated the skill."
+codex-classroom voice say verified "The TypeScript check passed."
 ```
 
-Poor cues:
+Weak cues:
 
 ```sh
 codex-classroom voice say note "I am using Get-Content on src/cli.ts and thinking about the parser."
 codex-classroom voice say note "Here is the whole error output: ..."
 ```
 
-## Operating Rules
+## Teacher Control
 
-- Keep cues sparse.
-- Never include secrets or private account details.
-- Prefer observable work over internal reasoning.
-- If the teacher asks for silence, run `codex-classroom voice pause`.
-- If Codex Voice is paused, do not resume unless the teacher asks or the task clearly requires it.
+The teacher controls the room.
+
+If the teacher asks you to be quiet, run:
+
+```sh
+codex-classroom voice pause
+```
+
+While paused, keep working silently. Resume only when the teacher asks or when they explicitly request a spoken update:
+
+```sh
+codex-classroom voice resume
+```
+
+## Privacy
+
+Voice cues are public classroom speech.
+
+Keep credentials, secrets, private account details, and long command output out of the cue. Summarize the outcome instead.
+
+## Failure Handling
+
+If `codex-classroom voice say` fails because the sidecar is not running, report that once in chat and continue the coding task silently.
+
+If a cue command fails for another reason, summarize the failure once. Do not retry cues in a loop.
