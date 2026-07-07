@@ -1,6 +1,6 @@
 {
   "name": "codex-classroom",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Teaching support toolkit for Codex classes.",
   "type": "module",
   "bin": {
@@ -15,7 +15,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "dev": "tsx src/cli.ts",

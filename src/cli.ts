@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import { parseArgs } from "node:util";
 
 import { initCommand } from "./commands/init.js";
@@ -10,13 +10,13 @@ import { resetCommand } from "./commands/reset.js";
 import { enterCommand } from "./commands/enter.js";
 import { restoreCommand } from "./commands/restore.js";
 import { rescueCommand } from "./commands/rescue.js";
-import { narratorCommand } from "./commands/narrator.js";
+import { voiceCommand } from "./commands/voice.js";
 import { CliError } from "./core/errors.js";
 import { createOutput } from "./core/output.js";
 import { createPathContext } from "./core/paths.js";
 import type { CommandContext, GlobalOptions } from "./types.js";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 const command = process.argv[2] ?? "help";
 const rawArgs = process.argv.slice(command === "help" ? 2 : 3);
@@ -56,8 +56,8 @@ try {
     await profilesCommand(context);
   } else if (command === "reset") {
     await resetCommand(context, global.positionals);
-  } else if (command === "narrator") {
-    await narratorCommand(context, global.positionals);
+  } else if (command === "voice") {
+    await voiceCommand(context, global.positionals);
   } else {
     throw new CliError(`Unknown command: ${command}`);
   }
@@ -116,14 +116,14 @@ function parseGlobalOptions(args: string[]): ParsedGlobalOptions {
     classroomRoot: parsed.values["classroom-root"],
     realCodexHome: parsed.values["real-codex-home"],
     desktopStateHome: parsed.values["desktop-state-home"],
-    narratorHost: parsed.values.host,
-    narratorPort: parsed.values.port,
-    narratorModel: parsed.values.model,
-    narratorVoice: parsed.values.voice,
-    narratorLanguage: parsed.values.language,
-    narratorApiKeyEnv: parsed.values["api-key-env"],
-    narratorSafetyIdentifier: parsed.values["safety-identifier"],
-    narratorOpen: parsed.values["no-open"] ? false : parsed.values.open,
+    voiceHost: parsed.values.host,
+    voicePort: parsed.values.port,
+    voiceModel: parsed.values.model,
+    voiceName: parsed.values.voice,
+    voiceLanguage: parsed.values.language,
+    voiceApiKeyEnv: parsed.values["api-key-env"],
+    voiceSafetyIdentifier: parsed.values["safety-identifier"],
+    voiceOpen: parsed.values["no-open"] ? false : parsed.values.open,
     copyAuth: parsed.values["no-copy-auth"] ? false : parsed.values["copy-auth"],
     copyConfig: parsed.values["no-copy-config"] ? false : parsed.values["copy-config"],
     copyWindowsSandbox: parsed.values["no-copy-windows-sandbox"]
@@ -158,7 +158,7 @@ Usage:
   codex-classroom doctor [profile] [options]
   codex-classroom profiles [options]
   codex-classroom reset [profile] [options]
-  codex-classroom narrator <start|say|pause|resume> [options]
+  codex-classroom voice <start|say|pause|resume> [options]
 
 Commands:
   init       Create a classroom profile with auth and clean classroom config
@@ -170,20 +170,20 @@ Commands:
   doctor     Run local checks without printing secrets
   profiles   List known classroom profiles
   reset      Remove one profile under the classroom root
-  narrator   Start or control the live classroom narrator
+  voice      Start or control Codex Voice for classroom conversation
 
 Options:
   --classroom-root <path>    Override ~/.codex-classroom
   --real-codex-home <path>   Override ~/.codex
   --desktop-state-home <path> Override Codex Desktop app-state path
-  --host <host>               Narrator local host
-  --port <port>               Narrator local port
-  --model <model>             Narrator Realtime model
-  --voice <voice>             Narrator Realtime voice
-  --language <language>       Narrator spoken language
+  --host <host>               Codex Voice local host
+  --port <port>               Codex Voice local port
+  --model <model>             Codex Voice Realtime model
+  --voice <voice>             Codex Voice Realtime voice
+  --language <language>       Codex Voice spoken language
   --api-key-env <name>        Env var containing the OpenAI API key
   --safety-identifier <id>    Optional privacy-preserving Realtime safety id
-  --no-open                   Do not open browser for narrator start
+  --no-open                   Do not open browser for voice start
   --copy-auth                Copy auth.json into the classroom profile
   --no-copy-auth             Do not copy auth.json
   --copy-config              Copy real config.toml instead of generating a clean one

@@ -1,18 +1,18 @@
-export type OutputMode = "text" | "json";
+﻿export type OutputMode = "text" | "json";
 export type SetupStatus = "copied" | "created" | "updated" | "exists" | "missing" | "skipped";
 
 export interface GlobalOptions {
   classroomRoot?: string;
   realCodexHome?: string;
   desktopStateHome?: string;
-  narratorHost?: string;
-  narratorPort?: string;
-  narratorModel?: string;
-  narratorVoice?: string;
-  narratorLanguage?: string;
-  narratorApiKeyEnv?: string;
-  narratorSafetyIdentifier?: string;
-  narratorOpen?: boolean;
+  voiceHost?: string;
+  voicePort?: string;
+  voiceModel?: string;
+  voiceName?: string;
+  voiceLanguage?: string;
+  voiceApiKeyEnv?: string;
+  voiceSafetyIdentifier?: string;
+  voiceOpen?: boolean;
   copyAuth?: boolean;
   copyConfig?: boolean;
   copyWindowsSandbox?: boolean;

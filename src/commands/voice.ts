@@ -1,22 +1,22 @@
-import http, { type IncomingMessage, type ServerResponse } from "node:http";
+﻿import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 
 import type { CommandContext } from "../types.js";
 import { CliError } from "../core/errors.js";
 import {
-  DEFAULT_NARRATOR_API_KEY_ENV,
-  DEFAULT_NARRATOR_HOST,
-  DEFAULT_NARRATOR_LANGUAGE,
-  DEFAULT_NARRATOR_MODEL,
-  DEFAULT_NARRATOR_VOICE,
-  type NarratorCue,
+  DEFAULT_VOICE_API_KEY_ENV,
+  DEFAULT_VOICE_HOST,
+  DEFAULT_VOICE_LANGUAGE,
+  DEFAULT_VOICE_MODEL,
+  DEFAULT_VOICE_NAME,
+  type VoiceCue,
   buildRealtimeSessionConfig,
   parseCueKind,
   parsePort,
-} from "../core/narrator.js";
+} from "../core/voice.js";
 
-interface NarratorOptions {
+interface VoiceOptions {
   host: string;
   port: number;
   model: string;
@@ -27,17 +27,17 @@ interface NarratorOptions {
   open: boolean;
 }
 
-export async function narratorCommand(context: CommandContext, args: string[]): Promise<void> {
+export async function voiceCommand(context: CommandContext, args: string[]): Promise<void> {
   const action = args[0] ?? "help";
-  const options = getNarratorOptions(context);
+  const options = getVoiceOptions(context);
 
   if (action === "help" || action === "--help" || action === "-h") {
-    printNarratorHelp(context);
+    printVoiceHelp(context);
     return;
   }
 
   if (action === "start") {
-    await startNarrator(context, options);
+    await startVoice(context, options);
     return;
   }
 
@@ -51,30 +51,30 @@ export async function narratorCommand(context: CommandContext, args: string[]): 
     return;
   }
 
-  throw new CliError(`Unknown narrator command: ${action}`);
+  throw new CliError(`Unknown voice command: ${action}`);
 }
 
-function getNarratorOptions(context: CommandContext): NarratorOptions {
+function getVoiceOptions(context: CommandContext): VoiceOptions {
   return {
-    host: context.options.narratorHost ?? DEFAULT_NARRATOR_HOST,
-    port: parsePort(context.options.narratorPort),
-    model: context.options.narratorModel ?? DEFAULT_NARRATOR_MODEL,
-    voice: context.options.narratorVoice ?? DEFAULT_NARRATOR_VOICE,
-    language: context.options.narratorLanguage ?? DEFAULT_NARRATOR_LANGUAGE,
-    apiKeyEnv: context.options.narratorApiKeyEnv ?? DEFAULT_NARRATOR_API_KEY_ENV,
-    safetyIdentifier: context.options.narratorSafetyIdentifier,
-    open: context.options.narratorOpen ?? true,
+    host: context.options.voiceHost ?? DEFAULT_VOICE_HOST,
+    port: parsePort(context.options.voicePort),
+    model: context.options.voiceModel ?? DEFAULT_VOICE_MODEL,
+    voice: context.options.voiceName ?? DEFAULT_VOICE_NAME,
+    language: context.options.voiceLanguage ?? DEFAULT_VOICE_LANGUAGE,
+    apiKeyEnv: context.options.voiceApiKeyEnv ?? DEFAULT_VOICE_API_KEY_ENV,
+    safetyIdentifier: context.options.voiceSafetyIdentifier,
+    open: context.options.voiceOpen ?? true,
   };
 }
 
-async function startNarrator(context: CommandContext, options: NarratorOptions): Promise<void> {
+async function startVoice(context: CommandContext, options: VoiceOptions): Promise<void> {
   const apiKey = process.env[options.apiKeyEnv];
   if (!apiKey) {
-    throw new CliError(`${options.apiKeyEnv} is not set. Configure an OpenAI API key before starting live narration.`);
+    throw new CliError(`${options.apiKeyEnv} is not set. Configure an OpenAI API key before starting Codex Voice.`);
   }
 
   const clients = new Set<ServerResponse>();
-  const cueHistory: NarratorCue[] = [];
+  const cueHistory: VoiceCue[] = [];
   const server = http.createServer(async (request, response) => {
     try {
       await routeRequest(request, response, {
@@ -98,10 +98,10 @@ async function startNarrator(context: CommandContext, options: NarratorOptions):
   if (context.options.json) {
     context.output.json({ ok: true, url, model: options.model, voice: options.voice });
   } else {
-    context.output.info(`Live narrator listening at ${url}`);
+    context.output.info(`Codex Voice listening at ${url}`);
     context.output.info(`Model: ${options.model}`);
     context.output.info(`Voice: ${options.voice}`);
-    context.output.info("Send cues with: codex-classroom narrator say \"short update\"");
+    context.output.info("Send cues with: codex-classroom voice say \"short update\"");
     context.output.info("Press Ctrl+C to stop.");
   }
 
@@ -114,16 +114,16 @@ async function routeRequest(
   request: IncomingMessage,
   response: ServerResponse,
   state: {
-    options: NarratorOptions;
+    options: VoiceOptions;
     apiKey: string;
     clients: Set<ServerResponse>;
-    cueHistory: NarratorCue[];
+    cueHistory: VoiceCue[];
   },
 ): Promise<void> {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
   if (request.method === "GET" && url.pathname === "/") {
-    sendHtml(response, renderNarratorPage(state.options));
+    sendHtml(response, renderVoicePage(state.options));
     return;
   }
 
@@ -180,7 +180,7 @@ async function routeRequest(
 async function createRealtimeCall(input: {
   sdp: string;
   apiKey: string;
-  options: NarratorOptions;
+  options: VoiceOptions;
 }): Promise<{ status: number; contentType: string; body: string }> {
   const form = new FormData();
   form.set("sdp", input.sdp);
@@ -215,17 +215,17 @@ async function createRealtimeCall(input: {
   };
 }
 
-async function sendCue(context: CommandContext, options: NarratorOptions, args: string[]): Promise<void> {
+async function sendCue(context: CommandContext, options: VoiceOptions, args: string[]): Promise<void> {
   const first = args[0];
   const kind = isCueKind(first) ? parseCueKind(first) : "note";
   const textArgs = isCueKind(first) ? args.slice(1) : args;
   const text = textArgs.join(" ").trim();
 
   if (!text && kind !== "pause" && kind !== "resume") {
-    throw new CliError("narrator say requires a short message.");
+    throw new CliError("voice say requires a short message.");
   }
 
-  const cue: NarratorCue = {
+  const cue: VoiceCue = {
     kind,
     text,
     at: new Date().toISOString(),
@@ -239,14 +239,14 @@ async function sendCue(context: CommandContext, options: NarratorOptions, args: 
     body: JSON.stringify(cue),
   }).catch((error: unknown) => {
     throw new CliError(
-      `Could not reach live narrator at ${options.host}:${options.port}: ${
+      `Could not reach Codex Voice at ${options.host}:${options.port}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
   });
 
   if (!response.ok) {
-    throw new CliError(`Live narrator rejected the cue: ${await response.text()}`);
+    throw new CliError(`Codex Voice rejected the cue: ${await response.text()}`);
   }
 
   if (context.options.json) {
@@ -268,7 +268,7 @@ function isCueKind(value: string | undefined): boolean {
   );
 }
 
-function normalizeCue(payload: unknown): NarratorCue {
+function normalizeCue(payload: unknown): VoiceCue {
   if (!payload || typeof payload !== "object") {
     throw new Error("Cue payload must be an object.");
   }
@@ -328,7 +328,7 @@ function openBrowser(url: string): void {
   child.unref();
 }
 
-function renderNarratorPage(options: NarratorOptions): string {
+function renderVoicePage(options: VoiceOptions): string {
   const config = JSON.stringify({
     model: options.model,
     voice: options.voice,
@@ -340,7 +340,7 @@ function renderNarratorPage(options: NarratorOptions): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Codex Classroom Narrator</title>
+  <title>Codex Voice</title>
   <style>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     body { margin: 0; min-height: 100vh; background: #141414; color: #f2efe7; }
@@ -369,8 +369,8 @@ function renderNarratorPage(options: NarratorOptions): string {
   <main>
     <div class="top">
       <div>
-        <h1>Codex Classroom Narrator</h1>
-        <p>Keep this tab open during class. The browser handles microphone and speaker audio; the local CLI only routes cues.</p>
+        <h1>Codex Voice</h1>
+        <p>Keep this tab open during class. Codex can speak as itself, listen to the teacher, and comment only when useful.</p>
       </div>
       <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Disconnected</span></div>
     </div>
@@ -388,8 +388,8 @@ function renderNarratorPage(options: NarratorOptions): string {
 
       <section class="panel">
         <h2>Manual cue</h2>
-        <p>Send one short update to the voice narrator.</p>
-        <textarea id="manualCue" placeholder="Codex just found the failing test and is narrowing the fix."></textarea>
+        <p>Send one short cue for Codex to say in its own voice.</p>
+        <textarea id="manualCue" placeholder="I just found the failing test and I am narrowing the fix."></textarea>
         <div class="controls">
           <button id="sendButton" disabled>Send cue</button>
           <button id="pauseButton" disabled>Pause</button>
@@ -420,7 +420,7 @@ function renderNarratorPage(options: NarratorOptions): string {
     const resumeButton = document.getElementById("resumeButton");
     const manualCue = document.getElementById("manualCue");
     const log = document.getElementById("log");
-    document.getElementById("sessionConfig").textContent = config.model + " · " + config.voice + " · " + config.language;
+    document.getElementById("sessionConfig").textContent = config.model + " - " + config.voice + " - " + config.language;
 
     function setStatus(text, mode) {
       statusText.textContent = text;
@@ -502,10 +502,10 @@ function renderNarratorPage(options: NarratorOptions): string {
       if (!connected || !dc || dc.readyState !== "open") return;
 
       const prompt = cue.kind === "pause"
-        ? "Pause classroom narration now. Stay silent until a resume cue or teacher request."
+        ? "Pause your classroom voice now. Stay silent until a resume cue or teacher request."
         : cue.kind === "resume"
-          ? "Resume classroom narration. Say one brief sentence that you are ready to continue."
-          : cueLabel(cue.kind) + ": " + cue.text + "\\n\\nSay one short classroom-friendly sentence about this. If the teacher appears to be speaking, wait for a natural pause.";
+          ? "Resume your classroom voice. Say one brief first-person sentence that you are ready to continue."
+          : cueLabel(cue.kind) + ": " + cue.text + "\\n\\nSay one short first-person classroom-friendly sentence about this. If the teacher appears to be speaking, wait for a natural pause.";
 
       dc.send(JSON.stringify({
         type: "conversation.item.create",
@@ -536,7 +536,7 @@ function renderNarratorPage(options: NarratorOptions): string {
       row.className = "cue";
       const meta = document.createElement("div");
       meta.className = "meta";
-      meta.textContent = new Date().toLocaleTimeString() + " · " + kind;
+      meta.textContent = new Date().toLocaleTimeString() + " - " + kind;
       const body = document.createElement("div");
       body.textContent = text;
       row.append(meta, body);
@@ -578,21 +578,21 @@ function renderNarratorPage(options: NarratorOptions): string {
 </html>`;
 }
 
-function printNarratorHelp(context: CommandContext): void {
-  context.output.info(`codex-classroom narrator
+function printVoiceHelp(context: CommandContext): void {
+  context.output.info(`codex-classroom voice
 
 Usage:
-  codex-classroom narrator start [options]
-  codex-classroom narrator say [kind] <message> [options]
-  codex-classroom narrator pause [options]
-  codex-classroom narrator resume [options]
+  codex-classroom voice start [options]
+  codex-classroom voice say [kind] <message> [options]
+  codex-classroom voice pause [options]
+  codex-classroom voice resume [options]
 
-Narrator options:
+Voice options:
   --host <host>             Local host to bind or contact (default: 127.0.0.1)
   --port <port>             Local port to bind or contact (default: 17321)
   --model <model>           Realtime model (default: gpt-realtime-2.1-mini)
   --voice <voice>           Realtime voice (default: marin)
-  --language <language>     Narration language (default: Spanish)
+  --language <language>     Spoken language (default: Spanish)
   --api-key-env <name>      Environment variable containing the OpenAI API key
   --safety-identifier <id>  Optional stable privacy-preserving safety identifier
   --no-open                 Do not open the browser after starting

@@ -14,15 +14,15 @@ Use classroom profiles when you want to demonstrate Codex from a clean interface
 
 Read the guide: [Classroom profiles](docs/classroom-profiles.md).
 
-## Live narration
+## Codex Voice
 
-Live narration gives Codex a classroom voice.
+Codex Voice lets Codex speak as itself during a live class.
 
-While Codex works, it speaks short updates about the parts students need to notice: what it is trying, what changed, what failed, what it is checking, and when the class should pause to look at evidence. It is not meant to read every command aloud.
+While Codex works, it can say short first-person updates about the parts students need to notice: what it is trying, what changed, what failed, what it is checking, and when the class should pause to look at evidence. It is not meant to read every command aloud.
 
-The narrator uses `gpt-realtime-2.1-mini` as a voice companion. It listens while the teacher explains, stays quiet when asked, and resumes when narration is useful again. This helps students who cannot read the terminal, file diffs, and chat stream fast enough during a live demo.
+Codex Voice uses `gpt-realtime-2.1-mini` as a voice companion. It listens while the teacher explains, answers brief spoken questions, stays quiet when asked, and resumes when useful again. This makes the demo feel more like a conversation between Codex and the professor.
 
-Read the guide: [Live narration](docs/live-narration.md).
+Read the guide: [Codex Voice](docs/codex-voice.md).
 
 ## Thread replay videos
 
