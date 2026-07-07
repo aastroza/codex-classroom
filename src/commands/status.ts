@@ -19,6 +19,8 @@ export async function statusCommand(context: CommandContext, args: string[]): Pr
     config: await pathExists(path.join(paths.codexHome, "config.toml")),
   };
 
+  const activeSession = await readActiveSession(context.paths.classroomRoot);
+  const activeForMs = activeSession ? Date.now() - Date.parse(activeSession.startedAt) : null;
   const payload = {
     ok: true,
     profile: paths.profileName,
@@ -26,7 +28,8 @@ export async function statusCommand(context: CommandContext, args: string[]): Pr
     realCodexHome: context.paths.realCodexHome,
     desktopStateHome: context.paths.desktopStateHome,
     activeSessionPath: activeSessionPath(context.paths.classroomRoot),
-    activeSession: await readActiveSession(context.paths.classroomRoot),
+    activeSession,
+    activeForMs,
     checks,
   };
 
@@ -45,4 +48,17 @@ export async function statusCommand(context: CommandContext, args: string[]): Pr
   for (const [name, value] of Object.entries(checks)) {
     context.output.info(`${name}: ${value ? "ok" : "missing"}`);
   }
+  if (activeSession && activeForMs !== null) {
+    context.output.info(`Active classroom session: ${activeSession.profile} for ${formatDuration(activeForMs)}`);
+  }
+}
+
+function formatDuration(ms: number): string {
+  const totalMinutes = Math.max(0, Math.floor(ms / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) {
+    return `${minutes}m`;
+  }
+  return `${hours}h ${minutes}m`;
 }

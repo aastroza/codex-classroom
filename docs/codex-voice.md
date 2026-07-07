@@ -12,9 +12,16 @@ Codex Voice has three parts:
 
 - the `codex-classroom` CLI, which runs a local sidecar
 - the `codex-voice` skill, which decides when a cue is worth sending
-- optional hooks, which keep a compact context bridge for teacher questions
+- Codex app-server context, which follows the active thread and keeps the voice grounded in plans, commands, diffs, and results
 
 The sidecar opens a browser page. The browser handles microphone capture, audio playback, and the Realtime session. The OpenAI API key stays on the local server side.
+
+The CLI uses `codex app-server` by default for context. Hooks are still available as a fallback for older setups:
+
+```sh
+codex-classroom voice start --context-source hooks
+codex-classroom voice start --context-source both
+```
 
 Codex can then send cues such as:
 
@@ -71,6 +78,14 @@ codex-classroom voice start --model gpt-realtime-2.1-mini
 codex-classroom voice start --no-open
 ```
 
+Open a projector-friendly visual panel without starting audio:
+
+```sh
+codex-classroom present
+```
+
+`present` can run without `OPENAI_API_KEY`. It shows plan, command, diff, and cue updates from the same local sidecar.
+
 ## Send cues manually
 
 Send a plain cue:
@@ -93,6 +108,12 @@ Pause or resume:
 ```sh
 codex-classroom voice pause
 codex-classroom voice resume
+```
+
+Attach the sidecar to a specific Codex thread when automatic thread detection is not enough:
+
+```sh
+codex-classroom voice attach <threadId>
 ```
 
 ## Use the skill
@@ -120,7 +141,21 @@ Avoid cues for secrets, credentials, long terminal output, obvious file reads, o
 
 ## Add thread context
 
-Codex Voice can install classroom hooks:
+Codex Voice uses `codex app-server` as its primary context source. This follows the current Codex thread and maps app-server events into compact classroom context:
+
+- plan updates
+- command starts and completions
+- meaningful failures or successful checks
+- diff summaries
+- turn completion
+
+Run doctor to verify app-server support:
+
+```sh
+codex-classroom voice doctor
+```
+
+Classroom hooks are still useful as a fallback or as an end-of-turn cue source:
 
 ```sh
 codex-classroom voice install-hook
@@ -161,7 +196,28 @@ codex-classroom voice context
 codex-classroom voice context 50
 ```
 
-When the browser sidecar is open, it receives context events and shares them silently with the Realtime session. The voice may not know about events that happened before hooks were trusted or while the sidecar was closed.
+When the browser sidecar is open, it receives context events and shares them silently with the Realtime session. The voice may not know about events that happened before the sidecar attached to the thread or while it was closed.
+
+## Present panel
+
+Present mode is for the projector.
+
+```sh
+codex-classroom present
+```
+
+It opens `/present`, a focused classroom view with:
+
+- the current plan
+- the current command
+- a compact diff summary
+- the latest cue as a subtitle
+
+Use `--qr` when you want to print the panel URL for another device on the same machine or tunnel setup:
+
+```sh
+codex-classroom present --qr
+```
 
 ## Implementation notes
 
@@ -170,7 +226,11 @@ Codex Voice is intentionally separate from Codex Desktop. It works across deskto
 The local sidecar:
 
 - serves the browser UI
+- serves the `/present` panel
 - keeps the OpenAI credential server-side
 - creates the Realtime session
 - receives `voice say`, `pause`, `resume`, and context events
 - forwards compact context into the active voice session
+- validates local host and origin headers
+- requires a per-session token for local POST commands
+- rejects oversized POST bodies

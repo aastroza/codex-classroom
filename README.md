@@ -12,10 +12,11 @@ When I teach the Codex app, my real workspace is the wrong first screen. It has 
 
 At the same time, I do not want a second account just for teaching. I want to use my Pro account, the models and plugins I already rely on, higher limits, subagents, and Fast mode. In a live class, waiting breaks attention.
 
-`codex-classroom` solves that teaching problem in two ways:
+`codex-classroom` solves that teaching problem in three ways:
 
 - **Classroom profiles**: temporarily open Codex Desktop with a clean local state while keeping the teacher's account and plugin setup available.
 - **Codex Voice**: let Codex speak short first-person teaching cues during long agent work, and let the teacher ask spoken questions about the current thread.
+- **Present mode**: open a projection-friendly panel that follows Codex plans, commands, diffs, and spoken cues without requiring the room to read the full thread.
 
 The tools are experimental. They are meant for instructors who are willing to test their setup before class and keep a restore path ready.
 
@@ -81,6 +82,24 @@ codex-classroom voice install-skill
 ```
 
 Read the guide: [Codex Voice](docs/codex-voice.md).
+
+## Present mode
+
+Use Present mode when the projector should show only the classroom signal: the current plan, the command being run, the latest diff summary, and any spoken cue.
+
+It uses Codex app-server events by default, so it can run as a visual panel even when no OpenAI API key is configured for voice:
+
+```sh
+codex-classroom present
+```
+
+You can also run the full voice sidecar and open the presentation panel from the same local server:
+
+```sh
+codex-classroom voice start
+```
+
+Then open `/present` on the printed local URL.
 
 ## Teaching principles
 

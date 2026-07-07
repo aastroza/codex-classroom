@@ -13,6 +13,8 @@ export interface GlobalOptions {
   voiceApiKeyEnv?: string;
   voiceSafetyIdentifier?: string;
   voiceOpen?: boolean;
+  voiceContextSource?: "app-server" | "hooks" | "both";
+  qr: boolean;
   copyAuth?: boolean;
   copyConfig?: boolean;
   copyWindowsSandbox?: boolean;
@@ -20,6 +22,7 @@ export interface GlobalOptions {
   passthrough: string[];
   force: boolean;
   noLaunch: boolean;
+  profileFresh: boolean;
   yes: boolean;
   json: boolean;
   plain: boolean;

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { pathExists } from "./fs.js";
 
-export type VoiceContextSource = "cue" | "hook" | "manual";
+export type VoiceContextSource = "cue" | "hook" | "manual" | "app-server";
 
 export interface VoiceContextEvent {
   schemaVersion: 1;

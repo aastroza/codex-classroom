@@ -6,7 +6,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { CommandContext } from "../types.js";
+import { AppServerClient, checkAppServerAvailable } from "../core/app-server-client.js";
 import { CliError } from "../core/errors.js";
+import type { MappedAppServerEvent, PresentEvent } from "../core/event-mapper.js";
 import { pathExists } from "../core/fs.js";
 import {
   appendVoiceContextEvent,
@@ -17,6 +19,14 @@ import {
   readVoiceContextEvents,
   type VoiceContextEvent,
 } from "../core/voice-context.js";
+import {
+  createVoiceToken,
+  readLimitedText,
+  readVoiceSession,
+  validateLocalRequest,
+  validateVoiceToken,
+  writeVoiceSession,
+} from "../core/voice-session.js";
 import {
   DEFAULT_VOICE_API_KEY_ENV,
   DEFAULT_VOICE_HOST,
@@ -38,6 +48,7 @@ interface VoiceOptions {
   apiKeyEnv: string;
   safetyIdentifier?: string;
   open: boolean;
+  contextSource: "app-server" | "hooks" | "both";
 }
 
 const CODEX_VOICE_SKILL_NAME = "codex-voice";
@@ -57,12 +68,22 @@ export async function voiceCommand(context: CommandContext, args: string[]): Pro
   }
 
   if (action === "start") {
-    await startVoice(context, options);
+    await startVoice(context, options, { openPath: "/" });
+    return;
+  }
+
+  if (action === "present") {
+    await startVoice(context, options, { openPath: "/present", allowMissingApiKey: true });
     return;
   }
 
   if (action === "say") {
     await sendCue(context, options, args.slice(1));
+    return;
+  }
+
+  if (action === "attach") {
+    await attachVoiceThread(context, options, args[1]);
     return;
   }
 
@@ -119,6 +140,7 @@ function getVoiceOptions(context: CommandContext): VoiceOptions {
     apiKeyEnv: context.options.voiceApiKeyEnv ?? DEFAULT_VOICE_API_KEY_ENV,
     safetyIdentifier: context.options.voiceSafetyIdentifier,
     open: context.options.voiceOpen ?? true,
+    contextSource: context.options.voiceContextSource ?? "app-server",
   };
 }
 
@@ -147,6 +169,7 @@ async function voiceDoctor(context: CommandContext, options: VoiceOptions): Prom
   const checks = [
     await checkCliOnPath(),
     await checkApiKey(options.apiKeyEnv),
+    await checkAppServer(),
     await checkSkillInstalled(context.paths.realCodexHome),
     await checkVoiceSidecar(options),
     await checkVoiceHook(context.paths.realCodexHome),
@@ -224,25 +247,35 @@ async function uninstallVoiceHook(context: CommandContext): Promise<void> {
   context.output.info(removed > 0 ? "Removed Codex Voice Stop hook" : "Codex Voice Stop hook was not installed");
 }
 
-async function startVoice(context: CommandContext, options: VoiceOptions): Promise<void> {
+async function startVoice(
+  context: CommandContext,
+  options: VoiceOptions,
+  startOptions: { openPath: "/" | "/present"; allowMissingApiKey?: boolean },
+): Promise<void> {
   const apiKey = process.env[options.apiKeyEnv];
-  if (!apiKey) {
+  if (!apiKey && !startOptions.allowMissingApiKey) {
     throw new CliError(`${options.apiKeyEnv} is not set. Configure an OpenAI API key before starting Codex Voice.`);
   }
 
   const clients = new Set<ServerResponse>();
   const cueHistory: VoiceCue[] = [];
   const contextHistory = await readVoiceContextEvents(context.paths.classroomRoot, 40);
+  const presentHistory: PresentEvent[] = [];
+  const token = createVoiceToken();
+  const serverState = {
+    options,
+    classroomRoot: context.paths.classroomRoot,
+    apiKey,
+    token,
+    clients,
+    cueHistory,
+    contextHistory,
+    presentHistory,
+    appServer: null as AppServerClient | null,
+  };
   const server = http.createServer(async (request, response) => {
     try {
-      await routeRequest(request, response, {
-        options,
-        classroomRoot: context.paths.classroomRoot,
-        apiKey,
-        clients,
-        cueHistory,
-        contextHistory,
-      });
+      await routeRequest(request, response, serverState);
     } catch (error) {
       sendJson(response, 500, {
         ok: false,
@@ -255,19 +288,36 @@ async function startVoice(context: CommandContext, options: VoiceOptions): Promi
   await once(server, "listening");
 
   const url = `http://${options.host}:${options.port}`;
+  await writeVoiceSession(context.paths.classroomRoot, {
+    schemaVersion: 1,
+    url,
+    token,
+    startedAt: new Date().toISOString(),
+  });
+  const appServer = shouldUseAppServer(options) ? await startAppServerBridge(context, options, clients, cueHistory, contextHistory, presentHistory) : null;
+  serverState.appServer = appServer;
   if (context.options.json) {
-    context.output.json({ ok: true, url, model: options.model, voice: options.voice });
+    context.output.json({ ok: true, url, presentUrl: `${url}/present`, model: options.model, voice: options.voice });
   } else {
     context.output.info(`Codex Voice listening at ${url}`);
+    context.output.info(`Presentation panel: ${url}/present`);
     context.output.info(`Model: ${options.model}`);
     context.output.info(`Voice: ${options.voice}`);
+    context.output.info(appServer ? "Context source: app-server" : `Context source: ${options.contextSource}`);
     context.output.info("Send cues with: codex-classroom voice say \"short update\"");
     context.output.info("Press Ctrl+C to stop.");
+    if (context.options.qr) {
+      context.output.info(`Share URL: ${url}/present`);
+    }
   }
 
   if (options.open) {
-    openBrowser(url);
+    openBrowser(`${url}${startOptions.openPath}`);
   }
+
+  server.on("close", () => {
+    appServer?.stop();
+  });
 }
 
 async function routeRequest(
@@ -276,12 +326,21 @@ async function routeRequest(
   state: {
     options: VoiceOptions;
     classroomRoot: string;
-    apiKey: string;
+    apiKey?: string;
     clients: Set<ServerResponse>;
     cueHistory: VoiceCue[];
     contextHistory: VoiceContextEvent[];
+    presentHistory: PresentEvent[];
+    token: string;
+    appServer: AppServerClient | null;
   },
 ): Promise<void> {
+  const localError = validateLocalRequest(request, state.options.host, state.options.port);
+  if (localError) {
+    sendJson(response, 403, { ok: false, error: localError });
+    return;
+  }
+
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
   if (request.method === "GET" && url.pathname === "/") {
@@ -302,6 +361,9 @@ async function routeRequest(
     for (const event of state.contextHistory.slice(-30)) {
       response.write(`event: context\ndata: ${JSON.stringify(event)}\n\n`);
     }
+    for (const event of state.presentHistory.slice(-30)) {
+      response.write(`event: present\ndata: ${JSON.stringify(event)}\n\n`);
+    }
     state.clients.add(response);
     request.on("close", () => {
       state.clients.delete(response);
@@ -309,8 +371,17 @@ async function routeRequest(
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/present") {
+    sendHtml(response, renderPresentPage(state.options));
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/session") {
-    const sdp = await readText(request);
+    if (!state.apiKey) {
+      sendJson(response, 503, { ok: false, error: "OPENAI_API_KEY is not configured; voice audio is disabled." });
+      return;
+    }
+    const sdp = await readLimitedText(request);
     const result = await createRealtimeCall({
       sdp,
       apiKey: state.apiKey,
@@ -324,6 +395,11 @@ async function routeRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/cue") {
+    const tokenError = validateVoiceToken(request, state.token);
+    if (tokenError) {
+      sendJson(response, 403, { ok: false, error: tokenError });
+      return;
+    }
     const payload = await readJson(request);
     const cue = normalizeCue(payload);
     const event = await appendVoiceContextEvent(state.classroomRoot, {
@@ -335,21 +411,52 @@ async function routeRequest(
     });
     state.cueHistory.push(cue);
     state.contextHistory.push(event);
+    const presentEvent: PresentEvent = { type: "subtitle", text: cue.text || cue.kind };
+    state.presentHistory.push(presentEvent);
     for (const client of state.clients) {
       client.write(`event: cue\ndata: ${JSON.stringify(cue)}\n\n`);
       client.write(`event: context\ndata: ${JSON.stringify(event)}\n\n`);
+      client.write(`event: present\ndata: ${JSON.stringify(presentEvent)}\n\n`);
     }
     sendJson(response, 200, { ok: true, cue });
     return;
   }
 
   if (request.method === "POST" && url.pathname === "/context-event") {
+    const tokenError = validateVoiceToken(request, state.token);
+    if (tokenError) {
+      sendJson(response, 403, { ok: false, error: tokenError });
+      return;
+    }
     const event = normalizeContextEvent(await readJson(request));
     state.contextHistory.push(event);
     for (const client of state.clients) {
       client.write(`event: context\ndata: ${JSON.stringify(event)}\n\n`);
     }
     sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/attach") {
+    const tokenError = validateVoiceToken(request, state.token);
+    if (tokenError) {
+      sendJson(response, 403, { ok: false, error: tokenError });
+      return;
+    }
+    if (!state.appServer) {
+      sendJson(response, 503, { ok: false, error: "app-server context is not running." });
+      return;
+    }
+    const payload = await readJson(request);
+    const threadId = typeof (payload as Record<string, unknown>).threadId === "string"
+      ? String((payload as Record<string, unknown>).threadId)
+      : "";
+    if (!threadId) {
+      sendJson(response, 400, { ok: false, error: "threadId is required." });
+      return;
+    }
+    await state.appServer.resumeThread(threadId);
+    sendJson(response, 200, { ok: true, threadId });
     return;
   }
 
@@ -369,6 +476,81 @@ async function routeRequest(
   }
 
   sendJson(response, 404, { ok: false, error: "Not found" });
+}
+
+function shouldUseAppServer(options: VoiceOptions): boolean {
+  return options.contextSource === "app-server" || options.contextSource === "both";
+}
+
+async function startAppServerBridge(
+  context: CommandContext,
+  options: VoiceOptions,
+  clients: Set<ServerResponse>,
+  cueHistory: VoiceCue[],
+  contextHistory: VoiceContextEvent[],
+  presentHistory: PresentEvent[],
+): Promise<AppServerClient | null> {
+  const client = new AppServerClient();
+  try {
+    await client.start();
+    await client.initialize();
+  } catch {
+    client.stop();
+    if (options.contextSource === "app-server") {
+      context.output.warn("codex app-server is not available; app-server context is disabled.");
+    }
+    return null;
+  }
+
+  client.onMappedEvent((mapped) => {
+    void handleMappedAppServerEvent(context, clients, cueHistory, contextHistory, presentHistory, mapped);
+  });
+
+  await attachFirstLoadedThread(client).catch(() => {
+    // The present panel still works with manual cues if there is no loaded thread yet.
+  });
+
+  return client;
+}
+
+async function attachFirstLoadedThread(client: AppServerClient): Promise<void> {
+  const loaded = await client.loadedThreads();
+  const data = loaded && typeof loaded === "object" ? (loaded as { data?: unknown }).data : undefined;
+  if (!Array.isArray(data) || typeof data[0] !== "string") {
+    return;
+  }
+  await client.resumeThread(data[0]);
+}
+
+async function handleMappedAppServerEvent(
+  context: CommandContext,
+  clients: Set<ServerResponse>,
+  cueHistory: VoiceCue[],
+  contextHistory: VoiceContextEvent[],
+  presentHistory: PresentEvent[],
+  mapped: MappedAppServerEvent,
+): Promise<void> {
+  if (mapped.context) {
+    const event = await appendVoiceContextEvent(context.paths.classroomRoot, mapped.context);
+    contextHistory.push(event);
+    broadcast(clients, "context", event);
+  }
+
+  if (mapped.cue) {
+    cueHistory.push(mapped.cue);
+    broadcast(clients, "cue", mapped.cue);
+  }
+
+  if (mapped.present) {
+    presentHistory.push(mapped.present);
+    broadcast(clients, "present", mapped.present);
+  }
+}
+
+function broadcast(clients: Set<ServerResponse>, event: string, data: unknown): void {
+  for (const client of clients) {
+    client.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  }
 }
 
 async function createRealtimeCall(input: {
@@ -425,10 +607,16 @@ async function sendCue(context: CommandContext, options: VoiceOptions, args: str
     at: new Date().toISOString(),
   };
 
+  const session = await readVoiceSession(context.paths.classroomRoot);
+  if (!session) {
+    throw new CliError("Codex Voice session token is missing. Start the sidecar with codex-classroom voice start.");
+  }
+
   const response = await fetch(`http://${options.host}:${options.port}/cue`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "X-Voice-Token": session.token,
     },
     body: JSON.stringify(cue),
   }).catch((error: unknown) => {
@@ -450,6 +638,41 @@ async function sendCue(context: CommandContext, options: VoiceOptions, args: str
   }
 }
 
+async function attachVoiceThread(context: CommandContext, options: VoiceOptions, threadId: string | undefined): Promise<void> {
+  if (!threadId) {
+    throw new CliError("voice attach requires a thread id.");
+  }
+  const session = await readVoiceSession(context.paths.classroomRoot);
+  if (!session) {
+    throw new CliError("Codex Voice session token is missing. Start the sidecar with codex-classroom voice start.");
+  }
+
+  const response = await fetch(`http://${options.host}:${options.port}/attach`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Voice-Token": session.token,
+    },
+    body: JSON.stringify({ threadId }),
+  }).catch((error: unknown) => {
+    throw new CliError(
+      `Could not reach Codex Voice at ${options.host}:${options.port}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
+
+  if (!response.ok) {
+    throw new CliError(`Codex Voice rejected attach: ${await response.text()}`);
+  }
+
+  if (context.options.json) {
+    context.output.json({ ok: true, threadId });
+  } else {
+    context.output.info(`Attached Codex Voice to thread ${threadId}.`);
+  }
+}
+
 async function sendHookStopCue(context: CommandContext, options: VoiceOptions): Promise<void> {
   const event = await appendHookEvent(context, options, "Stop");
   const cue: VoiceCue = {
@@ -458,11 +681,13 @@ async function sendHookStopCue(context: CommandContext, options: VoiceOptions): 
     at: new Date().toISOString(),
   };
 
-  await notifyContextEvent(options, event);
+  await notifyContextEvent(context, options, event);
+  const session = await readVoiceSession(context.paths.classroomRoot);
   await fetch(`http://${options.host}:${options.port}/cue`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...(session ? { "X-Voice-Token": session.token } : {}),
     },
     body: JSON.stringify(cue),
   }).catch(() => {
@@ -475,7 +700,7 @@ async function recordHookEvent(context: CommandContext, options: VoiceOptions, e
     throw new CliError("voice hook-event requires a Codex hook event name.");
   }
   const event = await appendHookEvent(context, options, eventName);
-  await notifyContextEvent(options, event);
+  await notifyContextEvent(context, options, event);
 
   if (context.options.json) {
     context.output.json({ ok: true, event });
@@ -511,11 +736,13 @@ async function printVoiceContext(context: CommandContext, args: string[]): Promi
   context.output.info(brief);
 }
 
-async function notifyContextEvent(options: VoiceOptions, event: VoiceContextEvent): Promise<void> {
+async function notifyContextEvent(context: CommandContext, options: VoiceOptions, event: VoiceContextEvent): Promise<void> {
+  const session = await readVoiceSession(context.paths.classroomRoot);
   await fetch(`http://${options.host}:${options.port}/context-event`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...(session ? { "X-Voice-Token": session.token } : {}),
     },
     body: JSON.stringify(event),
   }).catch(() => {
@@ -564,11 +791,7 @@ function normalizeContextEvent(payload: unknown): VoiceContextEvent {
 }
 
 async function readText(request: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
-  }
-  return Buffer.concat(chunks).toString("utf8");
+  return await readLimitedText(request);
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
@@ -718,6 +941,24 @@ async function checkVoiceHook(codexHome: string): Promise<VoiceDoctorCheck> {
     summary: `Codex Voice context hooks are incomplete (${missing.length} missing)`,
     fix: "Run codex-classroom voice install-hook, then review it with /hooks in Codex.",
   };
+}
+
+async function checkAppServer(): Promise<VoiceDoctorCheck> {
+  try {
+    const result = await checkAppServerAvailable();
+    return {
+      id: "app-server",
+      status: "ok",
+      summary: `codex app-server is available${result.userAgent ? ` (${result.userAgent})` : ""}`,
+    };
+  } catch (error) {
+    return {
+      id: "app-server",
+      status: "warn",
+      summary: `codex app-server is not responding: ${error instanceof Error ? error.message : String(error)}`,
+      fix: "Codex Voice will fall back to hooks when installed, or run without live thread context.",
+    };
+  }
 }
 
 async function runCommand(command: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
@@ -1134,12 +1375,116 @@ function renderVoicePage(options: VoiceOptions): string {
 </html>`;
 }
 
+function renderPresentPage(_options: VoiceOptions): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Classroom Present</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; overflow: hidden; background: #111; color: #f7f1e7; }
+    main { height: 100vh; display: grid; grid-template-rows: auto 1fr auto; gap: 28px; padding: 46px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
+    h1 { margin: 0; font-size: clamp(42px, 5vw, 76px); line-height: 0.95; letter-spacing: 0; }
+    .live { display: inline-flex; align-items: center; gap: 12px; border: 1px solid #3a362f; border-radius: 999px; padding: 12px 18px; color: #d8d0c2; font-size: 24px; }
+    .dot { width: 14px; height: 14px; border-radius: 50%; background: #60d394; }
+    .grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 28px; min-height: 0; }
+    .panel { min-height: 0; border: 1px solid #37332d; border-radius: 18px; padding: 30px; background: #1c1a17; box-shadow: 0 20px 70px rgba(0,0,0,.25); }
+    h2 { margin: 0 0 24px; color: #f4c95d; font-size: clamp(24px, 3vw, 42px); line-height: 1; }
+    .plan { display: grid; gap: 18px; }
+    .step { display: grid; grid-template-columns: 42px 1fr; gap: 18px; align-items: start; font-size: clamp(24px, 2.5vw, 38px); line-height: 1.16; color: #d8d0c2; }
+    .mark { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; border: 2px solid #716a5e; color: #716a5e; font-size: 22px; margin-top: 2px; }
+    .step.active { color: #fffaf0; }
+    .step.active .mark { border-color: #65d6ad; background: #65d6ad; color: #111; }
+    .step.done .mark { border-color: #f4c95d; background: #f4c95d; color: #111; }
+    .activity { font-size: clamp(25px, 2.8vw, 44px); line-height: 1.16; }
+    .meta { margin-top: 18px; color: #9d9486; font-size: clamp(18px, 1.8vw, 26px); }
+    .subtitle { border-radius: 18px; background: #f7f1e7; color: #151515; padding: 24px 30px; font-size: clamp(28px, 3vw, 52px); line-height: 1.1; min-height: 106px; display: flex; align-items: center; }
+    .empty { color: #8f8679; }
+    @media (max-width: 900px) { body { overflow: auto; } main { height: auto; } .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Codex is working</h1>
+      <div class="live"><span class="dot"></span><span id="status">Live</span></div>
+    </header>
+    <section class="grid">
+      <div class="panel">
+        <h2>Plan</h2>
+        <div id="plan" class="plan"><div class="empty">Waiting for Codex plan updates.</div></div>
+      </div>
+      <div class="panel">
+        <h2>Now</h2>
+        <div id="activity" class="activity empty">Waiting for activity.</div>
+        <div id="meta" class="meta"></div>
+      </div>
+    </section>
+    <div id="subtitle" class="subtitle">Codex Classroom presentation panel is ready.</div>
+  </main>
+  <script>
+    const plan = document.getElementById("plan");
+    const activity = document.getElementById("activity");
+    const meta = document.getElementById("meta");
+    const subtitle = document.getElementById("subtitle");
+    const status = document.getElementById("status");
+
+    function renderPlan(steps) {
+      if (!steps || steps.length === 0) {
+        plan.innerHTML = '<div class="empty">Waiting for Codex plan updates.</div>';
+        return;
+      }
+      plan.innerHTML = steps.slice(0, 6).map((step) => {
+        const done = step.status === "completed";
+        const active = step.status === "in_progress";
+        const mark = done ? "OK" : active ? ">" : "";
+        const cls = done ? "step done" : active ? "step active" : "step";
+        return '<div class="' + cls + '"><div class="mark">' + mark + '</div><div>' + escapeHtml(step.step) + '</div></div>';
+      }).join("");
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
+    }
+
+    const events = new EventSource("/events");
+    events.addEventListener("ready", () => { status.textContent = "Live"; });
+    events.addEventListener("present", (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === "plan") renderPlan(data.steps);
+      if (data.type === "command") {
+        activity.className = "activity";
+        activity.textContent = data.command;
+        meta.textContent = data.status === "failed" ? "Command failed" : data.status === "passed" ? "Command passed" : "Running command";
+      }
+      if (data.type === "diff") {
+        activity.className = "activity";
+        activity.textContent = data.filesChanged + " file" + (data.filesChanged === 1 ? "" : "s") + " changed";
+        meta.textContent = "+" + (data.additions || 0) + " / -" + (data.deletions || 0);
+      }
+      if (data.type === "subtitle") subtitle.textContent = data.text;
+    });
+    events.addEventListener("cue", (event) => {
+      const cue = JSON.parse(event.data);
+      if (cue.text) subtitle.textContent = cue.text;
+    });
+    events.addEventListener("error", () => { status.textContent = "Reconnecting"; });
+  </script>
+</body>
+</html>`;
+}
+
 function printVoiceHelp(context: CommandContext): void {
   context.output.info(`codex-classroom voice
 
 Usage:
   codex-classroom voice start [options]
   codex-classroom voice say [kind] <message> [options]
+  codex-classroom voice attach <threadId> [options]
   codex-classroom voice pause [options]
   codex-classroom voice resume [options]
   codex-classroom voice context [limit] [options]
@@ -1156,7 +1501,9 @@ Voice options:
   --language <language>     Spoken language (default: Spanish)
   --api-key-env <name>      Environment variable containing the OpenAI API key
   --safety-identifier <id>  Optional stable privacy-preserving safety identifier
+  --context-source <source> app-server, hooks, or both (default: app-server)
   --no-open                 Do not open the browser after starting
+  --qr                      Print the presentation URL
 
 Cue kinds:
   note, started, changed, blocked, verified, pause, resume

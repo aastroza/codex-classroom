@@ -25,6 +25,12 @@ Check local setup when the user asks why voice cues are not working:
 codex-classroom voice doctor
 ```
 
+Open the projection panel when the teacher wants a visual classroom view:
+
+```sh
+codex-classroom present
+```
+
 Install or repair the local skill only when the user asks for setup:
 
 ```sh
@@ -41,6 +47,12 @@ Inspect recorded thread context when the teacher asks what the voice knows:
 
 ```sh
 codex-classroom voice context
+```
+
+Attach the sidecar to a specific thread when automatic app-server detection is not enough:
+
+```sh
+codex-classroom voice attach <threadId>
 ```
 
 Send a cue:
