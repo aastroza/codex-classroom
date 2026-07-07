@@ -18,6 +18,52 @@ export interface MappedAppServerEvent {
   present?: PresentEvent;
 }
 
+export function mapThreadSnapshot(snapshot: unknown): PresentEvent[] {
+  const turns = extractTurns(snapshot).sort((a, b) => (numberValue(a.startedAt) ?? 0) - (numberValue(b.startedAt) ?? 0));
+  const events: PresentEvent[] = [];
+  let lastPlan: PresentEvent | null = null;
+  let lastCommand: PresentEvent | null = null;
+  let lastDiff: PresentEvent | null = null;
+  let lastSubtitle: PresentEvent | null = null;
+
+  for (const turn of turns) {
+    const turnStatus = stringValue(turn.status) ?? "completed";
+    for (const itemValue of arrayValue(turn.items)) {
+      const item = asRecord(itemValue);
+      if (item.type === "plan") {
+        const steps = planTextToSteps(stringValue(item.text) ?? "", turnStatus);
+        if (steps.length > 0) {
+          lastPlan = { type: "plan", steps, explanation: null };
+        }
+      }
+
+      if (item.type === "commandExecution") {
+        lastCommand = commandItemToPresent(item);
+      }
+
+      if (item.type === "fileChange") {
+        const changes = arrayValue(item.changes);
+        if (changes.length > 0) {
+          lastDiff = { type: "diff", filesChanged: changes.length };
+        }
+      }
+
+      if (item.type === "agentMessage") {
+        const text = compactText(stringValue(item.text) ?? "");
+        if (text) {
+          lastSubtitle = { type: "subtitle", text };
+        }
+      }
+    }
+  }
+
+  if (lastPlan) events.push(lastPlan);
+  if (lastCommand) events.push(lastCommand);
+  if (lastDiff) events.push(lastDiff);
+  if (lastSubtitle) events.push(lastSubtitle);
+  return events;
+}
+
 export function mapAppServerEvent(notification: unknown, now = new Date()): MappedAppServerEvent | null {
   const record = asRecord(notification);
   const method = stringValue(record.method);
@@ -74,8 +120,9 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
     const item = asRecord(params.item);
     if (item.type === "commandExecution") {
       const command = stringValue(item.command) ?? "command";
+      const status = commandStatus(item);
       const exitCode = numberValue(item.exitCode);
-      const failed = exitCode !== null && exitCode !== 0;
+      const failed = status === "failed";
       const summary = failed ? `Command failed with exit code ${exitCode}: ${command}` : `Command passed: ${command}`;
       return {
         context: {
@@ -156,6 +203,59 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
   }
 
   return null;
+}
+
+function extractTurns(snapshot: unknown): Record<string, unknown>[] {
+  const root = asRecord(snapshot);
+  const thread = asRecord(root.thread);
+  const initialTurnsPage = asRecord(root.initialTurnsPage);
+  const turns = arrayValue(thread.turns);
+  const pageTurns = arrayValue(initialTurnsPage.data);
+  return [...turns, ...pageTurns].map(asRecord).filter((turn) => arrayValue(turn.items).length > 0);
+}
+
+function planTextToSteps(text: string, turnStatus: string): PresentPlanStep[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[-*]\s+/, "").replace(/^\d+[.)]\s+/, "").trim())
+    .filter(Boolean)
+    .slice(0, 6)
+    .map((step, index, steps) => ({
+      step,
+      status: turnStatus === "inProgress" && index === steps.length - 1 ? "in_progress" : "completed",
+    }));
+}
+
+function commandItemToPresent(item: Record<string, unknown>): PresentEvent {
+  const command = stringValue(item.command) ?? "command";
+  const status = commandStatus(item);
+  const exitCode = numberValue(item.exitCode);
+  return {
+    type: "command",
+    command,
+    status: status === "running" ? "running" : status === "failed" ? "failed" : "passed",
+    exitCode,
+  };
+}
+
+function commandStatus(item: Record<string, unknown>): "running" | "passed" | "failed" {
+  const status = stringValue(item.status);
+  const exitCode = numberValue(item.exitCode);
+  if (status === "inProgress") {
+    return "running";
+  }
+  if (status === "failed" || status === "declined" || (exitCode !== null && exitCode !== 0)) {
+    return "failed";
+  }
+  return "passed";
+}
+
+function compactText(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 220) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 217).trim()}...`;
 }
 
 function normalizePlanStep(value: unknown): PresentPlanStep | null {

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { mapAppServerEvent } from "./event-mapper.js";
+import { mapAppServerEvent, mapThreadSnapshot } from "./event-mapper.js";
 
 const now = new Date("2026-07-07T12:00:00.000Z");
 
@@ -65,4 +65,37 @@ test("mapAppServerEvent summarizes turn diff", () => {
     additions: 1,
     deletions: 1,
   });
+});
+
+test("mapThreadSnapshot hydrates present events from stored turns", () => {
+  const events = mapThreadSnapshot({
+    thread: {
+      turns: [
+        {
+          status: "completed",
+          startedAt: 10,
+          items: [
+            { type: "plan", text: "- Read Slack\n- Summarize activity" },
+            { type: "commandExecution", command: "npm test", status: "completed", exitCode: 0 },
+            { type: "fileChange", changes: [{ path: "README.md" }] },
+            { type: "agentMessage", text: "Finished the Slack summary." },
+          ],
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(events, [
+    {
+      type: "plan",
+      explanation: null,
+      steps: [
+        { step: "Read Slack", status: "completed" },
+        { step: "Summarize activity", status: "completed" },
+      ],
+    },
+    { type: "command", command: "npm test", status: "passed", exitCode: 0 },
+    { type: "diff", filesChanged: 1 },
+    { type: "subtitle", text: "Finished the Slack summary." },
+  ]);
 });

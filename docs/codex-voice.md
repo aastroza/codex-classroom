@@ -12,11 +12,19 @@ Codex Voice has three parts:
 
 - the `codex-classroom` CLI, which runs a local sidecar
 - the `codex-voice` skill, which decides when a cue is worth sending
-- Codex app-server context, which follows the active thread and keeps the voice grounded in plans, commands, diffs, and results
+- a context bridge, which watches Codex Desktop sessions and uses Codex app-server when available
 
 The sidecar opens a browser page. The browser handles microphone capture, audio playback, and the Realtime session. The OpenAI API key stays on the local server side.
 
-The CLI uses `codex app-server` by default for context. Hooks are still available as a fallback for older setups:
+The normal teaching flow is:
+
+1. Start Codex Voice or Present mode.
+2. Open or create a normal Codex Desktop thread.
+3. Ask Codex to use `$codex-voice`.
+
+The sidecar watches Codex Desktop `rollout-*.jsonl` session files, so it can follow threads created in the app after the sidecar starts. It also uses `codex app-server` events when that connection can attach to a thread.
+
+Hooks are still available as an extra fallback for older setups:
 
 ```sh
 codex-classroom voice start --context-source hooks
@@ -84,7 +92,13 @@ Open a projector-friendly visual panel without starting audio:
 codex-classroom present
 ```
 
-`present` can run without `OPENAI_API_KEY`. It shows plan, command, diff, and cue updates from the same local sidecar.
+`present` can run without `OPENAI_API_KEY`. It shows plan, command, and cue updates from the same local sidecar.
+
+To open a finished or already-running thread in the panel, pass its thread id:
+
+```sh
+codex-classroom present <threadId>
+```
 
 ## Send cues manually
 
@@ -110,7 +124,7 @@ codex-classroom voice pause
 codex-classroom voice resume
 ```
 
-Attach the sidecar to a specific Codex thread when automatic thread detection is not enough:
+Attach the sidecar to a specific Codex thread when automatic thread detection is not enough. This works with both app-server threads and Codex Desktop session files:
 
 ```sh
 codex-classroom voice attach <threadId>
@@ -141,12 +155,18 @@ Avoid cues for secrets, credentials, long terminal output, obvious file reads, o
 
 ## Add thread context
 
-Codex Voice uses `codex app-server` as its primary context source. This follows the current Codex thread and maps app-server events into compact classroom context:
+Codex Voice builds context from two local sources:
+
+- Codex Desktop session files under `~/.codex/sessions`
+- `codex app-server` events, when app-server can attach to the thread
+
+The Desktop session watcher is what makes this flow work reliably: start `codex-classroom voice start`, then create a thread in Codex Desktop, then ask that thread to use `$codex-voice`.
+
+The context bridge maps local thread activity into compact classroom context:
 
 - plan updates
 - command starts and completions
 - meaningful failures or successful checks
-- diff summaries
 - turn completion
 
 Run doctor to verify app-server support:
@@ -155,7 +175,7 @@ Run doctor to verify app-server support:
 codex-classroom voice doctor
 ```
 
-Classroom hooks are still useful as a fallback or as an end-of-turn cue source:
+Classroom hooks are still useful as an end-of-turn cue source:
 
 ```sh
 codex-classroom voice install-hook
@@ -196,7 +216,7 @@ codex-classroom voice context
 codex-classroom voice context 50
 ```
 
-When the browser sidecar is open, it receives context events and shares them silently with the Realtime session. The voice may not know about events that happened before the sidecar attached to the thread or while it was closed.
+When the browser sidecar is open, it receives context events and shares them silently with the Realtime session. For a live class, start it before the thread begins. For an existing thread, pass the thread id to hydrate from stored session history.
 
 ## Present panel
 
@@ -210,8 +230,13 @@ It opens `/present`, a focused classroom view with:
 
 - the current plan
 - the current command
-- a compact diff summary
 - the latest cue as a subtitle
+
+Pass a thread id when you want the panel to hydrate from stored thread history before listening for new updates:
+
+```sh
+codex-classroom present <threadId>
+```
 
 Use `--qr` when you want to print the panel URL for another device on the same machine or tunnel setup:
 
@@ -230,6 +255,7 @@ The local sidecar:
 - keeps the OpenAI credential server-side
 - creates the Realtime session
 - receives `voice say`, `pause`, `resume`, and context events
+- watches Codex Desktop session files for live thread activity
 - forwards compact context into the active voice session
 - validates local host and origin headers
 - requires a per-session token for local POST commands

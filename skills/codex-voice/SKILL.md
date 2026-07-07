@@ -31,6 +31,8 @@ Open the projection panel when the teacher wants a visual classroom view:
 codex-classroom present
 ```
 
+If the teacher already started `codex-classroom voice start` or `codex-classroom present`, do not start another sidecar. Send cues into the running sidecar as the thread progresses.
+
 Install or repair the local skill only when the user asks for setup:
 
 ```sh
@@ -49,7 +51,7 @@ Inspect recorded thread context when the teacher asks what the voice knows:
 codex-classroom voice context
 ```
 
-Attach the sidecar to a specific thread when automatic app-server detection is not enough:
+Attach the sidecar to a specific thread when automatic detection is not enough:
 
 ```sh
 codex-classroom voice attach <threadId>

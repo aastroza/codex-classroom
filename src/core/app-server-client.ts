@@ -84,6 +84,7 @@ export class AppServerClient {
         ],
       },
     });
+    this.notify("initialized", {});
     return asInitializeResult(result);
   }
 
@@ -99,7 +100,18 @@ export class AppServerClient {
   }
 
   async resumeThread(threadId: string): Promise<unknown> {
-    return await this.request("thread/resume", { threadId, excludeTurns: true });
+    return await this.request("thread/resume", {
+      threadId,
+      initialTurnsPage: {
+        limit: 20,
+        sortDirection: "desc",
+        itemsView: "full",
+      },
+    });
+  }
+
+  async readThread(threadId: string): Promise<unknown> {
+    return await this.request("thread/read", { threadId, includeTurns: true });
   }
 
   async request(method: string, params: unknown): Promise<unknown> {
@@ -116,6 +128,14 @@ export class AppServerClient {
     });
     child.stdin.write(`${JSON.stringify(message)}\n`);
     return await result;
+  }
+
+  notify(method: string, params: unknown): void {
+    const child = this.child;
+    if (!child) {
+      return;
+    }
+    child.stdin.write(`${JSON.stringify({ method, params })}\n`);
   }
 
   stop(): void {

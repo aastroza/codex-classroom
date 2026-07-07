@@ -8,8 +8,9 @@ import { fileURLToPath } from "node:url";
 import type { CommandContext } from "../types.js";
 import { AppServerClient, checkAppServerAvailable } from "../core/app-server-client.js";
 import { CliError } from "../core/errors.js";
-import type { MappedAppServerEvent, PresentEvent } from "../core/event-mapper.js";
+import { mapThreadSnapshot, type MappedAppServerEvent, type PresentEvent } from "../core/event-mapper.js";
 import { pathExists } from "../core/fs.js";
+import { RolloutWatcher, type RolloutMappedEvent } from "../core/rollout-watcher.js";
 import {
   appendVoiceContextEvent,
   buildThreadBrief,
@@ -73,7 +74,7 @@ export async function voiceCommand(context: CommandContext, args: string[]): Pro
   }
 
   if (action === "present") {
-    await startVoice(context, options, { openPath: "/present", allowMissingApiKey: true });
+    await startVoice(context, options, { openPath: "/present", allowMissingApiKey: true, threadId: args[1] });
     return;
   }
 
@@ -250,7 +251,7 @@ async function uninstallVoiceHook(context: CommandContext): Promise<void> {
 async function startVoice(
   context: CommandContext,
   options: VoiceOptions,
-  startOptions: { openPath: "/" | "/present"; allowMissingApiKey?: boolean },
+  startOptions: { openPath: "/" | "/present"; allowMissingApiKey?: boolean; threadId?: string },
 ): Promise<void> {
   const apiKey = process.env[options.apiKeyEnv];
   if (!apiKey && !startOptions.allowMissingApiKey) {
@@ -272,6 +273,7 @@ async function startVoice(
     contextHistory,
     presentHistory,
     appServer: null as AppServerClient | null,
+    rolloutWatcher: null as RolloutWatcher | null,
   };
   const server = http.createServer(async (request, response) => {
     try {
@@ -294,8 +296,10 @@ async function startVoice(
     token,
     startedAt: new Date().toISOString(),
   });
-  const appServer = shouldUseAppServer(options) ? await startAppServerBridge(context, options, clients, cueHistory, contextHistory, presentHistory) : null;
+  const appServer = shouldUseAppServer(options) ? await startAppServerBridge(context, options, clients, cueHistory, contextHistory, presentHistory, startOptions.threadId) : null;
+  const rolloutWatcher = await startRolloutBridge(context, clients, contextHistory, presentHistory, startOptions.threadId);
   serverState.appServer = appServer;
+  serverState.rolloutWatcher = rolloutWatcher;
   if (context.options.json) {
     context.output.json({ ok: true, url, presentUrl: `${url}/present`, model: options.model, voice: options.voice });
   } else {
@@ -303,7 +307,7 @@ async function startVoice(
     context.output.info(`Presentation panel: ${url}/present`);
     context.output.info(`Model: ${options.model}`);
     context.output.info(`Voice: ${options.voice}`);
-    context.output.info(appServer ? "Context source: app-server" : `Context source: ${options.contextSource}`);
+    context.output.info(appServer ? "Context source: app-server + Desktop sessions" : "Context source: Desktop sessions");
     context.output.info("Send cues with: codex-classroom voice say \"short update\"");
     context.output.info("Press Ctrl+C to stop.");
     if (context.options.qr) {
@@ -317,6 +321,7 @@ async function startVoice(
 
   server.on("close", () => {
     appServer?.stop();
+    rolloutWatcher?.stop();
   });
 }
 
@@ -333,6 +338,7 @@ async function routeRequest(
     presentHistory: PresentEvent[];
     token: string;
     appServer: AppServerClient | null;
+    rolloutWatcher: RolloutWatcher | null;
   },
 ): Promise<void> {
   const localError = validateLocalRequest(request, state.options.host, state.options.port);
@@ -443,10 +449,6 @@ async function routeRequest(
       sendJson(response, 403, { ok: false, error: tokenError });
       return;
     }
-    if (!state.appServer) {
-      sendJson(response, 503, { ok: false, error: "app-server context is not running." });
-      return;
-    }
     const payload = await readJson(request);
     const threadId = typeof (payload as Record<string, unknown>).threadId === "string"
       ? String((payload as Record<string, unknown>).threadId)
@@ -455,7 +457,11 @@ async function routeRequest(
       sendJson(response, 400, { ok: false, error: "threadId is required." });
       return;
     }
-    await state.appServer.resumeThread(threadId);
+    const attached = await attachThreadEverywhere(state, threadId);
+    if (!attached) {
+      sendJson(response, 404, { ok: false, error: `Could not find thread ${threadId} in app-server or Desktop sessions.` });
+      return;
+    }
     sendJson(response, 200, { ok: true, threadId });
     return;
   }
@@ -489,6 +495,7 @@ async function startAppServerBridge(
   cueHistory: VoiceCue[],
   contextHistory: VoiceContextEvent[],
   presentHistory: PresentEvent[],
+  initialThreadId?: string,
 ): Promise<AppServerClient | null> {
   const client = new AppServerClient();
   try {
@@ -506,20 +513,111 @@ async function startAppServerBridge(
     void handleMappedAppServerEvent(context, clients, cueHistory, contextHistory, presentHistory, mapped);
   });
 
-  await attachFirstLoadedThread(client).catch(() => {
-    // The present panel still works with manual cues if there is no loaded thread yet.
-  });
+  if (initialThreadId) {
+    await attachThread(client, presentHistory, clients, initialThreadId).catch((error) => {
+      context.output.warn(`Could not attach thread ${initialThreadId}: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  } else {
+    await attachFirstLoadedThread(client, presentHistory, clients).catch(() => {
+      // The present panel still works with manual cues if there is no loaded thread yet.
+    });
+  }
+
+  startLoadedThreadPolling(client, presentHistory, clients);
 
   return client;
 }
 
-async function attachFirstLoadedThread(client: AppServerClient): Promise<void> {
+async function startRolloutBridge(
+  context: CommandContext,
+  clients: Set<ServerResponse>,
+  contextHistory: VoiceContextEvent[],
+  presentHistory: PresentEvent[],
+  initialThreadId?: string,
+): Promise<RolloutWatcher | null> {
+  const watcher = new RolloutWatcher({
+    codexHome: context.paths.realCodexHome,
+    since: new Date(),
+    onEvent: async (event) => {
+      await handleRolloutEvent(context, clients, contextHistory, presentHistory, event);
+    },
+  });
+
+  try {
+    await watcher.start(initialThreadId);
+    return watcher;
+  } catch (error) {
+    context.output.warn(`Desktop session context is disabled: ${error instanceof Error ? error.message : String(error)}`);
+    watcher.stop();
+    return null;
+  }
+}
+
+async function attachThreadEverywhere(
+  state: {
+    appServer: AppServerClient | null;
+    rolloutWatcher: RolloutWatcher | null;
+    presentHistory: PresentEvent[];
+    clients: Set<ServerResponse>;
+  },
+  threadId: string,
+): Promise<boolean> {
+  let attached = false;
+  if (state.appServer) {
+    try {
+      const snapshot = await state.appServer.resumeThread(threadId);
+      hydratePresentFromSnapshot(state.presentHistory, state.clients, snapshot);
+      attached = true;
+    } catch {
+      // Desktop-created threads are often only readable from rollout files.
+    }
+  }
+
+  if (state.rolloutWatcher) {
+    attached = (await state.rolloutWatcher.attachThread(threadId)) || attached;
+  }
+
+  return attached;
+}
+
+async function attachFirstLoadedThread(client: AppServerClient, presentHistory: PresentEvent[], clients: Set<ServerResponse>): Promise<void> {
   const loaded = await client.loadedThreads();
   const data = loaded && typeof loaded === "object" ? (loaded as { data?: unknown }).data : undefined;
   if (!Array.isArray(data) || typeof data[0] !== "string") {
     return;
   }
-  await client.resumeThread(data[0]);
+  await attachThread(client, presentHistory, clients, data[0]);
+}
+
+async function attachThread(client: AppServerClient, presentHistory: PresentEvent[], clients: Set<ServerResponse>, threadId: string): Promise<void> {
+  const snapshot = await client.resumeThread(threadId);
+  hydratePresentFromSnapshot(presentHistory, clients, snapshot);
+}
+
+function startLoadedThreadPolling(client: AppServerClient, presentHistory: PresentEvent[], clients: Set<ServerResponse>): void {
+  let attachedThreadId: string | null = null;
+  const timer = setInterval(() => {
+    void (async () => {
+      const loaded = await client.loadedThreads();
+      const data = loaded && typeof loaded === "object" ? (loaded as { data?: unknown }).data : undefined;
+      const threadId = Array.isArray(data) && typeof data[0] === "string" ? data[0] : null;
+      if (!threadId || threadId === attachedThreadId) {
+        return;
+      }
+      attachedThreadId = threadId;
+      await attachThread(client, presentHistory, clients, threadId);
+    })().catch(() => {
+      // Polling is best-effort; manual attach remains available.
+    });
+  }, 2000);
+  timer.unref();
+}
+
+function hydratePresentFromSnapshot(presentHistory: PresentEvent[], clients: Set<ServerResponse>, snapshot: unknown): void {
+  for (const event of mapThreadSnapshot(snapshot)) {
+    presentHistory.push(event);
+    broadcast(clients, "present", event);
+  }
 }
 
 async function handleMappedAppServerEvent(
@@ -544,6 +642,25 @@ async function handleMappedAppServerEvent(
   if (mapped.present) {
     presentHistory.push(mapped.present);
     broadcast(clients, "present", mapped.present);
+  }
+}
+
+async function handleRolloutEvent(
+  context: CommandContext,
+  clients: Set<ServerResponse>,
+  contextHistory: VoiceContextEvent[],
+  presentHistory: PresentEvent[],
+  event: RolloutMappedEvent,
+): Promise<void> {
+  if (event.context) {
+    const contextEvent = await appendVoiceContextEvent(context.paths.classroomRoot, event.context);
+    contextHistory.push(contextEvent);
+    broadcast(clients, "context", contextEvent);
+  }
+
+  if (event.present) {
+    presentHistory.push(event.present);
+    broadcast(clients, "present", event.present);
   }
 }
 
@@ -1492,6 +1609,7 @@ Usage:
   codex-classroom voice install-skill [options]
   codex-classroom voice install-hook [options]
   codex-classroom voice uninstall-hook [options]
+  codex-classroom present [threadId] [options]
 
 Voice options:
   --host <host>             Local host to bind or contact (default: 127.0.0.1)

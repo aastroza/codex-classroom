@@ -203,7 +203,7 @@ Usage:
   codex-classroom profiles [options]
   codex-classroom reset [profile] [options]
   codex-classroom voice <start|say|attach|pause|resume> [options]
-  codex-classroom present [options]
+  codex-classroom present [threadId] [options]
 
 Commands:
   init       Create a classroom profile with auth and clean classroom config

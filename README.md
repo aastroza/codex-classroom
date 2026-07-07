@@ -61,6 +61,8 @@ Use Codex Voice when a Codex thread will run long enough that students cannot re
 
 Codex Voice runs a local browser sidecar. Codex sends short cues through the `codex-voice` skill, the voice speaks them aloud, and the teacher can ask brief questions during class.
 
+For the normal live-class flow, start the sidecar first, then open or create a Codex Desktop thread and ask Codex to use `$codex-voice`. The sidecar watches Codex Desktop session files, so Present mode can follow Desktop-created threads even when they were not started by the sidecar.
+
 This helps when you want Codex to say things like:
 
 - what it is trying now
@@ -85,12 +87,18 @@ Read the guide: [Codex Voice](docs/codex-voice.md).
 
 ## Present mode
 
-Use Present mode when the projector should show only the classroom signal: the current plan, the command being run, the latest diff summary, and any spoken cue.
+Use Present mode when the projector should show only the classroom signal: the current plan, the command being run, and the latest spoken or written classroom cue.
 
-It uses Codex app-server events by default, so it can run as a visual panel even when no OpenAI API key is configured for voice:
+It can run as a visual panel even when no OpenAI API key is configured for voice:
 
 ```sh
 codex-classroom present
+```
+
+For an existing thread:
+
+```sh
+codex-classroom present <threadId>
 ```
 
 You can also run the full voice sidecar and open the presentation panel from the same local server:
@@ -100,6 +108,8 @@ codex-classroom voice start
 ```
 
 Then open `/present` on the printed local URL.
+
+Present mode reads Codex Desktop session history and also uses `codex app-server` when available. This makes the common teaching flow work: start Present, create a normal Codex Desktop thread, and let the panel fill as Codex works.
 
 ## Teaching principles
 
