@@ -11,13 +11,31 @@ export function defaultRealCodexHome(): string {
   return process.env.CODEX_REAL_HOME ?? path.join(os.homedir(), ".codex");
 }
 
+export function defaultDesktopStateHome(): string {
+  if (process.env.CODEX_DESKTOP_STATE_HOME) {
+    return process.env.CODEX_DESKTOP_STATE_HOME;
+  }
+
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"), "Codex");
+  }
+
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", "Codex");
+  }
+
+  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"), "Codex");
+}
+
 export function createPathContext(overrides: {
   classroomRoot?: string;
   realCodexHome?: string;
+  desktopStateHome?: string;
 }): PathContext {
   return {
     classroomRoot: path.resolve(overrides.classroomRoot ?? defaultClassroomRoot()),
     realCodexHome: path.resolve(overrides.realCodexHome ?? defaultRealCodexHome()),
+    desktopStateHome: path.resolve(overrides.desktopStateHome ?? defaultDesktopStateHome()),
   };
 }
 
@@ -29,9 +47,18 @@ export function getProfilePaths(classroomRoot: string, profileName: string): Pro
     profileName: safeName,
     profileDir,
     codexHome: path.join(profileDir, "codex-home"),
+    desktopState: path.join(profileDir, "desktop-state"),
     workspace: path.join(profileDir, "workspace"),
     manifest: path.join(profileDir, "manifest.json"),
   };
+}
+
+export function activeSessionPath(classroomRoot: string): string {
+  return path.join(classroomRoot, "active-session.json");
+}
+
+export function backupDir(classroomRoot: string, backupId: string): string {
+  return path.join(classroomRoot, "backups", backupId);
 }
 
 export function normalizeProfileName(profileName: string): string {

@@ -21,6 +21,23 @@ export async function ensureDir(target: string, dryRun: boolean): Promise<void> 
   await fs.mkdir(target, { recursive: true });
 }
 
+export async function movePath(source: string, destination: string, dryRun: boolean): Promise<"moved" | "missing"> {
+  if (!(await pathExists(source))) {
+    return "missing";
+  }
+
+  if (await pathExists(destination)) {
+    throw new CliError(`Destination already exists: ${destination}`);
+  }
+
+  if (!dryRun) {
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.rename(source, destination);
+  }
+
+  return "moved";
+}
+
 export async function copyFileIfMissing(source: string, destination: string, dryRun: boolean): Promise<"copied" | "exists" | "missing"> {
   if (!(await pathExists(source))) {
     return "missing";

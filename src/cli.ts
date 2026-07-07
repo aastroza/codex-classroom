@@ -7,6 +7,9 @@ import { statusCommand } from "./commands/status.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { profilesCommand } from "./commands/profiles.js";
 import { resetCommand } from "./commands/reset.js";
+import { enterCommand } from "./commands/enter.js";
+import { restoreCommand } from "./commands/restore.js";
+import { rescueCommand } from "./commands/rescue.js";
 import { CliError } from "./core/errors.js";
 import { createOutput } from "./core/output.js";
 import { createPathContext } from "./core/paths.js";
@@ -25,6 +28,7 @@ const context: CommandContext = {
   paths: createPathContext({
     classroomRoot: global.classroomRoot,
     realCodexHome: global.realCodexHome,
+    desktopStateHome: global.desktopStateHome,
   }),
 };
 
@@ -35,6 +39,12 @@ try {
     console.log(VERSION);
   } else if (command === "init") {
     await initCommand(context, global.positionals);
+  } else if (command === "enter") {
+    await enterCommand(context, global.positionals);
+  } else if (command === "restore") {
+    await restoreCommand(context, global.positionals);
+  } else if (command === "rescue") {
+    await rescueCommand(context);
   } else if (command === "start") {
     await startCommand(context, global.positionals);
   } else if (command === "status") {
@@ -71,10 +81,13 @@ function parseGlobalOptions(args: string[]): ParsedGlobalOptions {
     options: {
       "classroom-root": { type: "string" },
       "real-codex-home": { type: "string" },
+      "desktop-state-home": { type: "string" },
       "copy-auth": { type: "boolean" },
       "no-copy-auth": { type: "boolean" },
       "copy-config": { type: "boolean" },
       "no-copy-config": { type: "boolean" },
+      force: { type: "boolean", default: false },
+      "no-launch": { type: "boolean", default: false },
       yes: { type: "boolean", short: "y", default: false },
       json: { type: "boolean", default: false },
       plain: { type: "boolean", default: false },
@@ -87,9 +100,12 @@ function parseGlobalOptions(args: string[]): ParsedGlobalOptions {
   return {
     classroomRoot: parsed.values["classroom-root"],
     realCodexHome: parsed.values["real-codex-home"],
+    desktopStateHome: parsed.values["desktop-state-home"],
     copyAuth: parsed.values["no-copy-auth"] ? false : parsed.values["copy-auth"],
     copyConfig: parsed.values["no-copy-config"] ? false : parsed.values["copy-config"],
     passthrough,
+    force: parsed.values.force ?? false,
+    noLaunch: parsed.values["no-launch"] ?? false,
     yes: parsed.values.yes ?? false,
     json: parsed.values.json ?? false,
     plain: parsed.values.plain ?? false,
@@ -107,6 +123,9 @@ Launch Codex Desktop with clean, local classroom profiles.
 
 Usage:
   codex-classroom init [profile] [options]
+  codex-classroom enter [profile] [options] [-- <codex app args>]
+  codex-classroom restore [options]
+  codex-classroom rescue [options]
   codex-classroom start [profile] [options] [-- <codex app args>]
   codex-classroom status [profile] [options]
   codex-classroom doctor [profile] [options]
@@ -115,7 +134,10 @@ Usage:
 
 Commands:
   init       Create a classroom profile and copy minimal Codex auth/config
-  start      Launch "codex app" with CODEX_HOME pointed at the profile
+  enter      Swap local Codex state to a classroom profile, then launch Desktop
+  restore    Restore the real local Codex state after class
+  rescue     Show active-session recovery details
+  start      Legacy launcher; does not isolate Codex Desktop sidebar state
   status     Show profile paths and setup state
   doctor     Run local checks without printing secrets
   profiles   List known classroom profiles
@@ -124,11 +146,14 @@ Commands:
 Options:
   --classroom-root <path>    Override ~/.codex-classroom
   --real-codex-home <path>   Override ~/.codex
+  --desktop-state-home <path> Override Codex Desktop app-state path
   --copy-auth                Copy auth.json into the classroom profile
   --no-copy-auth             Do not copy auth.json
   --copy-config              Copy config.toml into the classroom profile
   --no-copy-config           Do not copy config.toml
   -y, --yes                  Confirm destructive prompts
+  --force                    Bypass Codex process checks
+  --no-launch                Enter classroom mode without opening Codex Desktop
   --dry-run                  Print planned changes without writing
   --json                     Emit machine-readable output
   --plain                    Avoid styled text in human output

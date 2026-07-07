@@ -3,9 +3,12 @@ export type OutputMode = "text" | "json";
 export interface GlobalOptions {
   classroomRoot?: string;
   realCodexHome?: string;
+  desktopStateHome?: string;
   copyAuth?: boolean;
   copyConfig?: boolean;
   passthrough: string[];
+  force: boolean;
+  noLaunch: boolean;
   yes: boolean;
   json: boolean;
   plain: boolean;
@@ -31,6 +34,7 @@ export interface ProfilePaths {
   profileName: string;
   profileDir: string;
   codexHome: string;
+  desktopState: string;
   workspace: string;
   manifest: string;
 }
@@ -44,6 +48,7 @@ export interface CommandContext {
 export interface PathContext {
   classroomRoot: string;
   realCodexHome: string;
+  desktopStateHome: string;
 }
 
 export interface Output {
@@ -58,4 +63,28 @@ export interface DoctorCheck {
   status: "ok" | "warn" | "fail";
   summary: string;
   details?: Record<string, unknown>;
+}
+
+export interface ActiveSession {
+  schemaVersion: 1;
+  profile: string;
+  backupId: string;
+  startedAt: string;
+  classroomRoot: string;
+  paths: {
+    realCodexHome: string;
+    desktopStateHome: string;
+    profileCodexHome: string;
+    profileDesktopState: string;
+    workspace: string;
+    backupCodexHome: string;
+    backupDesktopState: string;
+  };
+}
+
+export interface MovePlan {
+  label: "codex-home" | "desktop-state";
+  target: string;
+  profile: string;
+  backup: string;
 }

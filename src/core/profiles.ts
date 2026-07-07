@@ -19,6 +19,7 @@ export async function ensureProfile(options: {
   manifest.copyConfig = options.copyConfig;
 
   await ensureDir(options.paths.codexHome, options.dryRun);
+  await ensureDir(options.paths.desktopState, options.dryRun);
   await ensureDir(options.paths.workspace, options.dryRun);
 
   if (!(await pathExists(options.paths.manifest))) {

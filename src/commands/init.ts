@@ -26,6 +26,7 @@ export async function initCommand(context: CommandContext, args: string[]): Prom
     profile: paths.profileName,
     classroomRoot: context.paths.classroomRoot,
     codexHome: paths.codexHome,
+    desktopState: paths.desktopState,
     workspace: paths.workspace,
     manifest: result.manifest,
     copied: result.copied,
@@ -39,6 +40,7 @@ export async function initCommand(context: CommandContext, args: string[]): Prom
 
   context.output.info(`Initialized profile "${paths.profileName}"`);
   context.output.info(`CODEX_HOME: ${paths.codexHome}`);
+  context.output.info(`Desktop state: ${paths.desktopState}`);
   context.output.info(`Workspace:  ${paths.workspace}`);
   for (const [file, status] of Object.entries(result.copied)) {
     context.output.info(`${file}: ${status}`);

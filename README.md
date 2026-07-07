@@ -1,14 +1,14 @@
 # codex-classroom
 
-Launch Codex Desktop with clean, local classroom profiles.
+Temporarily switch Codex Desktop into a clean classroom profile.
 
-`codex-classroom` is a small CLI for teaching Codex without showing a crowded personal workspace. It starts Codex with `CODEX_HOME` pointed at a separate local profile, while reusing your existing Codex login when you choose to copy `auth.json`.
+`codex-classroom` is a small CLI for teaching Codex without showing a crowded personal workspace. It swaps your local Codex state into a reversible classroom profile, launches Codex Desktop, and restores your real state after class.
 
 ## Why
 
 When you teach Codex, students often need a low-noise first screen. Your real Codex setup may have projects, chats, automations, plugins, skills, and history that are useful for daily work but distracting in class.
 
-This tool creates a local classroom profile instead of modifying your real profile.
+Codex Desktop currently keeps sidebar state outside the CLI `CODEX_HOME` launcher path, so a simple `CODEX_HOME=... codex app` launch is not enough. This tool uses a stricter local state switcher.
 
 ## Quick Start
 
@@ -17,7 +17,13 @@ Run without installing:
 ```sh
 npx codex-classroom init intro
 npx codex-classroom doctor intro
-npx codex-classroom start intro
+npx codex-classroom enter intro
+```
+
+After class, close Codex Desktop and restore:
+
+```sh
+npx codex-classroom restore
 ```
 
 Or install globally:
@@ -25,21 +31,17 @@ Or install globally:
 ```sh
 npm install -g codex-classroom
 codex-classroom init intro
-codex-classroom start intro
-```
-
-The default profile name is `intro`, so this also works:
-
-```sh
-codex-classroom init
-codex-classroom start
+codex-classroom enter intro
+codex-classroom restore
 ```
 
 ## Commands
 
 ```text
 codex-classroom init [profile]
-codex-classroom start [profile]
+codex-classroom enter [profile]
+codex-classroom restore
+codex-classroom rescue
 codex-classroom status [profile]
 codex-classroom doctor [profile]
 codex-classroom profiles
@@ -59,7 +61,7 @@ By default it copies:
 - `~/.codex/auth.json`
 - `~/.codex/config.toml`
 
-into the classroom profile. It does not copy sessions, automations, plugins, skills, or local state databases.
+into the classroom profile. It does not copy sessions, automations, plugins, skills, local state databases, or Desktop app state.
 
 Skip auth or config copying:
 
@@ -68,25 +70,72 @@ codex-classroom init intro --no-copy-auth
 codex-classroom init intro --no-copy-config
 ```
 
-### `start`
+### `enter`
 
-Launches Codex Desktop with `CODEX_HOME` pointed at the classroom profile.
+Switches local Codex state into the classroom profile, then launches Codex Desktop.
 
 ```sh
-codex-classroom start intro
+codex-classroom enter intro
 ```
+
+This command:
+
+1. Refuses to run if Codex appears to be open.
+2. Writes an `active-session.json` recovery file.
+3. Moves your real `~/.codex` to a backup folder.
+4. Moves your classroom `codex-home` into `~/.codex`.
+5. Moves your real Codex Desktop app state to a backup folder.
+6. Moves the classroom Desktop app state into the real Desktop state location.
+7. Opens Codex Desktop.
 
 Pass extra `codex app` arguments after `--`:
 
 ```sh
-codex-classroom start intro -- --enable some-feature
+codex-classroom enter intro -- --enable some-feature
 ```
 
-Preview without launching:
+Preview without moving files:
 
 ```sh
-codex-classroom start intro --dry-run
+codex-classroom enter intro --dry-run
 ```
+
+Switch state without opening Codex Desktop:
+
+```sh
+codex-classroom enter intro --no-launch
+```
+
+Skip the confirmation prompt:
+
+```sh
+codex-classroom enter intro --yes
+```
+
+### `restore`
+
+Restores your real local Codex state after class.
+
+```sh
+codex-classroom restore
+```
+
+Close Codex Desktop before running this. The command refuses to run if Codex appears to be open, unless you pass `--force`.
+
+```sh
+codex-classroom restore --force
+```
+
+### `rescue`
+
+Shows the active session and whether each target, profile, and backup path exists.
+
+```sh
+codex-classroom rescue
+codex-classroom rescue --json
+```
+
+Use this if your machine shuts down during an active classroom session or a restore fails.
 
 ### `status`
 
@@ -99,7 +148,7 @@ codex-classroom status intro --json
 
 ### `doctor`
 
-Checks the real Codex home, classroom profile, source auth file, and `codex` executable.
+Checks the real Codex home, Desktop state home, classroom profile, source auth file, and `codex` executable.
 
 ```sh
 codex-classroom doctor intro
@@ -116,7 +165,7 @@ codex-classroom profiles
 
 ### `reset`
 
-Deletes one classroom profile. It refuses to delete outside the classroom root.
+Deletes one inactive classroom profile. It refuses to delete outside the classroom root.
 
 ```sh
 codex-classroom reset intro
@@ -138,23 +187,36 @@ Default real Codex home:
 ~/.codex
 ```
 
-Override either:
+Default Desktop state home:
+
+- Windows: `%APPDATA%\Codex`
+- macOS: `~/Library/Application Support/Codex`
+- Linux: `${XDG_CONFIG_HOME:-~/.config}/Codex`
+
+Override paths:
 
 ```sh
-codex-classroom init intro \
+codex-classroom enter intro \
   --classroom-root ~/Teaching/codex-classroom \
-  --real-codex-home ~/.codex
+  --real-codex-home ~/.codex \
+  --desktop-state-home "$HOME/Library/Application Support/Codex"
 ```
 
 Profile layout:
 
 ```text
 ~/.codex-classroom/
+  active-session.json
+  backups/
+    2026-07-06T20-00-00-000Z-abc123/
+      codex-home/
+      desktop-state/
   profiles/
     intro/
       codex-home/
         auth.json
         config.toml
+      desktop-state/
       workspace/
       manifest.json
 ```
@@ -163,14 +225,20 @@ Profile layout:
 
 `codex-classroom` is designed to be reversible:
 
-- It does not move, rename, or delete your real `~/.codex`.
-- It only writes inside the classroom root.
+- It refuses to enter or restore while Codex appears to be running.
+- It writes `active-session.json` before moving state.
+- It stores the real state under `~/.codex-classroom/backups/<backup-id>`.
+- It only manages profile and backup paths inside the classroom root.
 - It refuses to reset paths outside the classroom root.
 - It never prints token values.
-- `--dry-run` is available for commands that write or launch.
+- `--dry-run` is available for commands that move or launch.
 - `--json` output is intended for scripts and automation.
 
 The one sensitive operation is copying `auth.json`. That lets the classroom profile use your existing Codex login, but the copied file remains sensitive and should not be committed or shared.
+
+## Important Limitation
+
+`codex-classroom start` is kept as a legacy launcher. It sets `CODEX_HOME` for `codex app`, but it does **not** isolate Codex Desktop sidebar state. Use `enter` and `restore` for real classroom mode.
 
 ## Platform Support
 
@@ -181,13 +249,6 @@ The CLI is Node-based and should work on:
 - Windows
 
 It expects the `codex` CLI to be available on `PATH`.
-
-## Current Limitations
-
-- The tool relies on Codex honoring `CODEX_HOME`.
-- It does not inject CSS or hide UI sections inside Codex.
-- It does not manage the Codex Desktop process after launch.
-- It does not publish or sync classroom profiles.
 
 ## Development
 

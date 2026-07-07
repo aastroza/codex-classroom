@@ -34,6 +34,7 @@ export async function startCommand(context: CommandContext, args: string[]): Pro
       return;
     }
   } else {
+    context.output.warn("start is a legacy launcher and does not isolate Codex Desktop sidebar state. Use enter/restore for classroom mode.");
     context.output.info(`Launching Codex classroom profile "${paths.profileName}"`);
     context.output.info(`CODEX_HOME: ${paths.codexHome}`);
   }

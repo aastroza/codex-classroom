@@ -18,6 +18,13 @@ export async function doctorCommand(context: CommandContext, args: string[]): Pr
   });
 
   checks.push({
+    id: "desktop-state-home",
+    status: (await pathExists(context.paths.desktopStateHome)) ? "ok" : "warn",
+    summary: `Desktop state home ${await pathStatus(context.paths.desktopStateHome)}`,
+    details: { path: context.paths.desktopStateHome },
+  });
+
+  checks.push({
     id: "real-auth",
     status: (await pathExists(path.join(context.paths.realCodexHome, "auth.json"))) ? "ok" : "warn",
     summary: `Source auth.json ${await pathStatus(path.join(context.paths.realCodexHome, "auth.json"))}`,
@@ -28,6 +35,13 @@ export async function doctorCommand(context: CommandContext, args: string[]): Pr
     status: (await pathExists(paths.codexHome)) ? "ok" : "warn",
     summary: `Profile CODEX_HOME ${await pathStatus(paths.codexHome)}`,
     details: { path: paths.codexHome },
+  });
+
+  checks.push({
+    id: "profile-desktop-state",
+    status: (await pathExists(paths.desktopState)) ? "ok" : "warn",
+    summary: `Profile Desktop state ${await pathStatus(paths.desktopState)}`,
+    details: { path: paths.desktopState },
   });
 
   checks.push({
