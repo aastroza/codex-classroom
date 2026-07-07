@@ -1,0 +1,45 @@
+import type { ProfileManifest } from "../types.js";
+
+export function defaultManifest(profileName: string): ProfileManifest {
+  return {
+    name: profileName,
+    description: "Clean Codex classroom profile",
+    copyAuth: true,
+    copyConfig: true,
+    features: {
+      sessions: "empty",
+      automations: "empty",
+      plugins: "minimal",
+      skills: "minimal",
+    },
+  };
+}
+
+export function validateManifest(value: ProfileManifest): ProfileManifest {
+  if (!value || typeof value !== "object") {
+    throw new Error("Manifest must be an object.");
+  }
+
+  if (typeof value.name !== "string" || value.name.length === 0) {
+    throw new Error("Manifest must include a non-empty name.");
+  }
+
+  if (typeof value.copyAuth !== "boolean" || typeof value.copyConfig !== "boolean") {
+    throw new Error("Manifest copyAuth and copyConfig must be booleans.");
+  }
+
+  const features = value.features;
+  if (!features || features.sessions !== "empty" || features.automations !== "empty") {
+    throw new Error("Manifest sessions and automations must currently be set to empty.");
+  }
+
+  if (!["empty", "minimal", "inherit"].includes(features.plugins)) {
+    throw new Error("Manifest plugins must be empty, minimal, or inherit.");
+  }
+
+  if (!["empty", "minimal", "inherit"].includes(features.skills)) {
+    throw new Error("Manifest skills must be empty, minimal, or inherit.");
+  }
+
+  return value;
+}

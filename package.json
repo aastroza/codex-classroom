@@ -1,0 +1,39 @@
+{
+  "name": "codex-classroom",
+  "version": "0.1.0",
+  "description": "Launch Codex Desktop with clean, local classroom profiles.",
+  "type": "module",
+  "bin": {
+    "codex-classroom": "./dist/cli.js",
+    "cxclass": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "dev": "tsx src/cli.ts",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "codex",
+    "classroom",
+    "cli",
+    "openai",
+    "teaching"
+  ],
+  "author": "Alonso Astroza",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.12",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4"
+  }
+}
