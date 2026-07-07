@@ -26,15 +26,6 @@ Codex Voice ships as a CLI plus a skill. Install the CLI globally, run `codex-cl
 
 Read the guide: [Codex Voice](docs/codex-voice.md).
 
-## Thread replay videos
-
-Thread replay turns a completed Codex thread into a video lesson.
-
-It uses the same context bridge that powers Codex Voice. As Codex works, classroom hooks record a compact event stream: prompts, important tool results, voice cues, and turn completions. Replay exports that stream as a Remotion project so you can preview, edit, and render a video.
-
-Use thread replay when you want to show the shape of a long Codex task without making students wait through the whole run. For example, a `goal` workflow can be recorded once and reused as teaching material.
-
-Read the guide: [Thread replay](docs/thread-replay.md).
 
 ## Teaching principles
 

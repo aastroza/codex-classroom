@@ -80,7 +80,7 @@ Routine commands can stay silent when they do not change the story: simple file 
 
 Coverage criterion: every meaningful phase has at least one cue. If you work through several tool calls without speaking, send a `note` cue at the next transition that summarizes the progress.
 
-The cues also become classroom context for teacher questions and replay videos. Make each cue useful as a future event: include the observable action, the reason it matters, and the evidence students should watch.
+The cues also become classroom context for teacher questions. Make each cue useful as a future event: include the observable action, the reason it matters, and the evidence students should watch.
 
 ## Cue Style
 
