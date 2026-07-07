@@ -13,7 +13,6 @@ export interface GlobalOptions {
   voiceApiKeyEnv?: string;
   voiceSafetyIdentifier?: string;
   voiceOpen?: boolean;
-  out?: string;
   copyAuth?: boolean;
   copyConfig?: boolean;
   copyWindowsSandbox?: boolean;

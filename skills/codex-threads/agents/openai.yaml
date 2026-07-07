@@ -1,4 +1,0 @@
-interface:
-  display_name: "Codex Threads"
-  short_description: "Export and import Codex classroom threads."
-  default_prompt: "Export or import selected Codex threads for a classroom profile."

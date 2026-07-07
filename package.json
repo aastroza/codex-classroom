@@ -1,6 +1,6 @@
 {
   "name": "codex-classroom",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Teaching support toolkit for Codex classes.",
   "type": "module",
   "bin": {
@@ -38,9 +38,5 @@
     "@types/node": "^20.14.12",
     "tsx": "^4.16.2",
     "typescript": "^5.5.4"
-  },
-  "dependencies": {
-    "fflate": "^0.8.3",
-    "sql.js": "^1.14.1"
   }
 }
