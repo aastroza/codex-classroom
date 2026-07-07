@@ -12,6 +12,33 @@ The first version runs as a local sidecar:
 
 This is intentionally separate from Codex Desktop. It works the same way across desktop platforms because the only audio dependency is a modern browser.
 
+## Install
+
+Codex Voice has two pieces:
+
+- the `codex-classroom` CLI, available on `PATH`
+- the `codex-voice` skill, installed under the active Codex home
+
+Install the CLI globally:
+
+```sh
+npm install -g github:aastroza/codex-classroom
+```
+
+Install the skill:
+
+```sh
+codex-classroom voice install-skill
+```
+
+Restart Codex after installing the skill.
+
+Check the setup:
+
+```sh
+codex-classroom voice doctor
+```
+
 ## Start the voice
 
 ```sh
@@ -62,7 +89,27 @@ codex-classroom voice resume
 
 The skill lives at [skills/codex-voice/SKILL.md](../skills/codex-voice/SKILL.md).
 
-Install or copy it into a Codex skills directory when you want Codex to send cues automatically during a teaching run. The skill keeps Codex's spoken comments sparse: it should mark meaningful transitions, not every command.
+Install it with `codex-classroom voice install-skill` when you want Codex to send cues automatically during a teaching run. The skill keeps Codex's spoken comments sparse: it should mark meaningful transitions, not every command.
+
+The skill assumes the sidecar is already running. It should send cues with `codex-classroom voice say`; it should not start the sidecar from inside an ordinary task.
+
+## End-of-turn hook
+
+Codex can speak when a turn ends by using a `Stop` hook:
+
+```sh
+codex-classroom voice install-hook
+```
+
+Then open `/hooks` in Codex and trust the new hook. Codex requires review before non-managed command hooks run.
+
+The hook is temporary in the practical sense: remove it when class is over.
+
+```sh
+codex-classroom voice uninstall-hook
+```
+
+The hook runs `codex-classroom voice hook-stop`. That command exits successfully even when the sidecar is not running, so it should not block Codex.
 
 ## Classroom guidance
 

@@ -1,9 +1,13 @@
-﻿import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { CommandContext } from "../types.js";
 import { CliError } from "../core/errors.js";
+import { pathExists } from "../core/fs.js";
 import {
   DEFAULT_VOICE_API_KEY_ENV,
   DEFAULT_VOICE_HOST,
@@ -27,6 +31,10 @@ interface VoiceOptions {
   open: boolean;
 }
 
+const CODEX_VOICE_SKILL_NAME = "codex-voice";
+const CODEX_VOICE_HOOK_STATUS = "Speaking Codex Voice turn status";
+const CODEX_VOICE_HOOK_COMMAND = "codex-classroom voice hook-stop";
+
 export async function voiceCommand(context: CommandContext, args: string[]): Promise<void> {
   const action = args[0] ?? "help";
   const options = getVoiceOptions(context);
@@ -43,6 +51,31 @@ export async function voiceCommand(context: CommandContext, args: string[]): Pro
 
   if (action === "say") {
     await sendCue(context, options, args.slice(1));
+    return;
+  }
+
+  if (action === "hook-stop") {
+    await sendHookStopCue(options);
+    return;
+  }
+
+  if (action === "install-skill") {
+    await installVoiceSkill(context);
+    return;
+  }
+
+  if (action === "doctor") {
+    await voiceDoctor(context, options);
+    return;
+  }
+
+  if (action === "install-hook") {
+    await installVoiceHook(context);
+    return;
+  }
+
+  if (action === "uninstall-hook") {
+    await uninstallVoiceHook(context);
     return;
   }
 
@@ -65,6 +98,111 @@ function getVoiceOptions(context: CommandContext): VoiceOptions {
     safetyIdentifier: context.options.voiceSafetyIdentifier,
     open: context.options.voiceOpen ?? true,
   };
+}
+
+async function installVoiceSkill(context: CommandContext): Promise<void> {
+  const source = path.join(packageRoot(), "skills", CODEX_VOICE_SKILL_NAME, "SKILL.md");
+  const targetDir = path.join(context.paths.realCodexHome, "skills", CODEX_VOICE_SKILL_NAME);
+  const target = path.join(targetDir, "SKILL.md");
+
+  if (!(await pathExists(source))) {
+    throw new CliError(`Packaged Codex Voice skill is missing: ${source}`);
+  }
+
+  await fs.mkdir(targetDir, { recursive: true });
+  await fs.copyFile(source, target);
+
+  if (context.options.json) {
+    context.output.json({ ok: true, skill: CODEX_VOICE_SKILL_NAME, target });
+    return;
+  }
+
+  context.output.info(`Installed ${CODEX_VOICE_SKILL_NAME} skill to ${target}`);
+  context.output.info("Restart Codex to pick up new skills.");
+}
+
+async function voiceDoctor(context: CommandContext, options: VoiceOptions): Promise<void> {
+  const checks = [
+    await checkCliOnPath(),
+    await checkApiKey(options.apiKeyEnv),
+    await checkSkillInstalled(context.paths.realCodexHome),
+    await checkVoiceSidecar(options),
+    await checkVoiceHook(context.paths.realCodexHome),
+  ];
+  const ok = checks.every((check) => check.status !== "fail");
+
+  if (context.options.json) {
+    context.output.json({ ok, checks });
+    return;
+  }
+
+  for (const check of checks) {
+    context.output.info(`${check.status.toUpperCase()} ${check.id}: ${check.summary}`);
+    if (check.fix) {
+      context.output.info(`  fix: ${check.fix}`);
+    }
+  }
+}
+
+async function installVoiceHook(context: CommandContext): Promise<void> {
+  const hooksPath = path.join(context.paths.realCodexHome, "hooks.json");
+  const config = await readHooksConfig(hooksPath);
+  const stopHooks = ensureHookGroups(config, "Stop");
+  const group = stopHooks[0] ?? { hooks: [] };
+  if (stopHooks.length === 0) {
+    stopHooks.push(group);
+  }
+
+  const alreadyInstalled = group.hooks.some((hook) => hook.type === "command" && hook.command === CODEX_VOICE_HOOK_COMMAND);
+  if (!alreadyInstalled) {
+    group.hooks.push({
+      type: "command",
+      command: CODEX_VOICE_HOOK_COMMAND,
+      timeout: 10,
+      statusMessage: CODEX_VOICE_HOOK_STATUS,
+    });
+  }
+
+  await writeHooksConfig(hooksPath, config);
+
+  if (context.options.json) {
+    context.output.json({ ok: true, hooksPath, installed: !alreadyInstalled });
+    return;
+  }
+
+  context.output.info(alreadyInstalled ? "Codex Voice Stop hook already installed" : "Installed Codex Voice Stop hook");
+  context.output.info(`hooks.json: ${hooksPath}`);
+  context.output.info("Open /hooks in Codex and trust the new hook before expecting it to run.");
+}
+
+async function uninstallVoiceHook(context: CommandContext): Promise<void> {
+  const hooksPath = path.join(context.paths.realCodexHome, "hooks.json");
+  if (!(await pathExists(hooksPath))) {
+    context.output.info(`No hooks.json found at ${hooksPath}`);
+    return;
+  }
+
+  const config = await readHooksConfig(hooksPath);
+  const groups = config.hooks.Stop ?? [];
+  let removed = 0;
+  for (const group of groups) {
+    const before = group.hooks.length;
+    group.hooks = group.hooks.filter((hook) => !(hook.type === "command" && hook.command === CODEX_VOICE_HOOK_COMMAND));
+    removed += before - group.hooks.length;
+  }
+  config.hooks.Stop = groups.filter((group) => group.hooks.length > 0);
+  if (config.hooks.Stop.length === 0) {
+    delete config.hooks.Stop;
+  }
+
+  await writeHooksConfig(hooksPath, config);
+
+  if (context.options.json) {
+    context.output.json({ ok: true, hooksPath, removed });
+    return;
+  }
+
+  context.output.info(removed > 0 ? "Removed Codex Voice Stop hook" : "Codex Voice Stop hook was not installed");
 }
 
 async function startVoice(context: CommandContext, options: VoiceOptions): Promise<void> {
@@ -256,6 +394,24 @@ async function sendCue(context: CommandContext, options: VoiceOptions, args: str
   }
 }
 
+async function sendHookStopCue(options: VoiceOptions): Promise<void> {
+  const cue: VoiceCue = {
+    kind: "verified",
+    text: "I finished my response and I am ready for the next instruction.",
+    at: new Date().toISOString(),
+  };
+
+  await fetch(`http://${options.host}:${options.port}/cue`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(cue),
+  }).catch(() => {
+    // Hooks must not block Codex if the sidecar is not running.
+  });
+}
+
 function isCueKind(value: string | undefined): boolean {
   return (
     value === "note" ||
@@ -310,6 +466,169 @@ function sendHtml(response: ServerResponse, body: string): void {
     "Content-Type": "text/html; charset=utf-8",
   });
   response.end(body);
+}
+
+interface VoiceDoctorCheck {
+  id: string;
+  status: "ok" | "warn" | "fail";
+  summary: string;
+  fix?: string;
+}
+
+interface HooksConfig {
+  hooks: Record<string, HookGroup[]>;
+}
+
+interface HookGroup {
+  matcher?: string;
+  hooks: HookHandler[];
+}
+
+interface HookHandler {
+  type: string;
+  command: string;
+  timeout?: number;
+  statusMessage?: string;
+}
+
+async function checkCliOnPath(): Promise<VoiceDoctorCheck> {
+  const result = await runCommand("codex-classroom", ["--version"]);
+  if (result.ok) {
+    return { id: "cli-path", status: "ok", summary: `codex-classroom ${result.stdout || "is available"}` };
+  }
+
+  return {
+    id: "cli-path",
+    status: "fail",
+    summary: "codex-classroom is not available on PATH",
+    fix: "Install globally with npm install -g github:aastroza/codex-classroom, then open a new terminal.",
+  };
+}
+
+async function checkApiKey(apiKeyEnv: string): Promise<VoiceDoctorCheck> {
+  if (process.env[apiKeyEnv]) {
+    return { id: "api-key", status: "ok", summary: `${apiKeyEnv} is available in this process` };
+  }
+
+  return {
+    id: "api-key",
+    status: "fail",
+    summary: `${apiKeyEnv} is not available in this process`,
+    fix: process.platform === "win32"
+      ? `$env:${apiKeyEnv} = [Environment]::GetEnvironmentVariable('${apiKeyEnv}','User')`
+      : `export ${apiKeyEnv}=...`,
+  };
+}
+
+async function checkSkillInstalled(codexHome: string): Promise<VoiceDoctorCheck> {
+  const target = path.join(codexHome, "skills", CODEX_VOICE_SKILL_NAME, "SKILL.md");
+  if (await pathExists(target)) {
+    return { id: "skill", status: "ok", summary: `Skill installed at ${target}` };
+  }
+
+  return {
+    id: "skill",
+    status: "fail",
+    summary: `Skill is missing at ${target}`,
+    fix: "Run codex-classroom voice install-skill, then restart Codex.",
+  };
+}
+
+async function checkVoiceSidecar(options: VoiceOptions): Promise<VoiceDoctorCheck> {
+  const url = `http://${options.host}:${options.port}/health`;
+  try {
+    const response = await fetch(url);
+    if (response.ok) {
+      return { id: "sidecar", status: "ok", summary: `Sidecar is responding at ${url}` };
+    }
+    return {
+      id: "sidecar",
+      status: "warn",
+      summary: `Sidecar responded with HTTP ${response.status}`,
+      fix: "Restart it with codex-classroom voice start.",
+    };
+  } catch {
+    return {
+      id: "sidecar",
+      status: "warn",
+      summary: `Sidecar is not running at ${url}`,
+      fix: "Start it with codex-classroom voice start.",
+    };
+  }
+}
+
+async function checkVoiceHook(codexHome: string): Promise<VoiceDoctorCheck> {
+  const hooksPath = path.join(codexHome, "hooks.json");
+  if (!(await pathExists(hooksPath))) {
+    return {
+      id: "stop-hook",
+      status: "warn",
+      summary: "Codex Voice Stop hook is not installed",
+      fix: "Run codex-classroom voice install-hook, then review it with /hooks in Codex.",
+    };
+  }
+
+  const config = await readHooksConfig(hooksPath);
+  const installed = (config.hooks.Stop ?? []).some((group) =>
+    group.hooks.some((hook) => hook.type === "command" && hook.command === CODEX_VOICE_HOOK_COMMAND),
+  );
+  if (installed) {
+    return { id: "stop-hook", status: "ok", summary: `Codex Voice Stop hook is configured in ${hooksPath}` };
+  }
+
+  return {
+    id: "stop-hook",
+    status: "warn",
+    summary: "Codex Voice Stop hook is not installed",
+    fix: "Run codex-classroom voice install-hook, then review it with /hooks in Codex.",
+  };
+}
+
+async function runCommand(command: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+  return await new Promise((resolve) => {
+    const child = spawn(command, args, {
+      shell: process.platform === "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => {
+      resolve({ ok: false, stdout: "", stderr: error.message });
+    });
+    child.on("exit", (code) => {
+      resolve({ ok: code === 0, stdout: stdout.trim(), stderr: stderr.trim() });
+    });
+  });
+}
+
+async function readHooksConfig(hooksPath: string): Promise<HooksConfig> {
+  if (!(await pathExists(hooksPath))) {
+    return { hooks: {} };
+  }
+
+  const parsed = JSON.parse(await fs.readFile(hooksPath, "utf8")) as Partial<HooksConfig>;
+  return { hooks: parsed.hooks ?? {} };
+}
+
+async function writeHooksConfig(hooksPath: string, config: HooksConfig): Promise<void> {
+  await fs.mkdir(path.dirname(hooksPath), { recursive: true });
+  await fs.writeFile(hooksPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+function ensureHookGroups(config: HooksConfig, event: string): HookGroup[] {
+  config.hooks[event] ??= [];
+  return config.hooks[event];
+}
+
+function packageRoot(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
 
 function openBrowser(url: string): void {
@@ -585,6 +904,10 @@ Usage:
   codex-classroom voice say [kind] <message> [options]
   codex-classroom voice pause [options]
   codex-classroom voice resume [options]
+  codex-classroom voice doctor [options]
+  codex-classroom voice install-skill [options]
+  codex-classroom voice install-hook [options]
+  codex-classroom voice uninstall-hook [options]
 
 Voice options:
   --host <host>             Local host to bind or contact (default: 127.0.0.1)

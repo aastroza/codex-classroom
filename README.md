@@ -22,6 +22,8 @@ While Codex works, it can say short first-person updates about the parts student
 
 Codex Voice uses `gpt-realtime-2.1-mini` as a voice companion. It listens while the teacher explains, answers brief spoken questions, stays quiet when asked, and resumes when useful again. This makes the demo feel more like a conversation between Codex and the professor.
 
+Codex Voice ships as a CLI plus a skill. Install the CLI globally, run `codex-classroom voice install-skill`, and use `codex-classroom voice doctor` to check that the current Codex setup can find it. A removable `Stop` hook can make Codex speak when a turn ends.
+
 Read the guide: [Codex Voice](docs/codex-voice.md).
 
 ## Thread replay videos

@@ -17,6 +17,24 @@ Start the sidecar only when the user explicitly asks for it:
 codex-classroom voice start
 ```
 
+Check local setup when the user asks why voice cues are not working:
+
+```sh
+codex-classroom voice doctor
+```
+
+Install or repair the local skill only when the user asks for setup:
+
+```sh
+codex-classroom voice install-skill
+```
+
+Install the end-of-turn hook only when the user asks Codex to speak after every response:
+
+```sh
+codex-classroom voice install-hook
+```
+
 Send a cue:
 
 ```sh
@@ -102,3 +120,9 @@ Keep credentials, secrets, private account details, and long command output out 
 If `codex-classroom voice say` fails because the sidecar is not running, report that once in chat and continue the coding task silently.
 
 If a cue command fails for another reason, summarize the failure once. Do not retry cues in a loop.
+
+If `codex-classroom` is not on `PATH`, tell the user to install the CLI globally and continue the task silently:
+
+```sh
+npm install -g github:aastroza/codex-classroom
+```
