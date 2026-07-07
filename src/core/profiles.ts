@@ -48,10 +48,15 @@ export async function ensureProfile(options: {
         options.dryRun,
       )
     : await writeCleanConfig(
+        path.join(options.realCodexHome, "config.toml"),
         path.join(options.paths.codexHome, "config.toml"),
         options.windowsSandboxMode,
         options.dryRun,
       );
+
+  if (!options.copyConfig) {
+    Object.assign(copied, await copyPluginSupportAssets(options.realCodexHome, options.paths.codexHome, options.dryRun));
+  }
 
   if (options.copyWindowsSandbox) {
     Object.assign(copied, await copyWindowsSandboxAssets(options.realCodexHome, options.paths.codexHome, options.dryRun));
@@ -98,11 +103,15 @@ async function setWindowsSandboxMode(
 }
 
 async function writeCleanConfig(
+  sourceConfigPath: string,
   configPath: string,
   windowsSandboxMode: "elevated" | "unelevated" | "inherit",
   dryRun: boolean,
 ): Promise<SetupStatus> {
-  const next = buildCleanConfig(windowsSandboxMode);
+  const inheritedPluginConfig = (await pathExists(sourceConfigPath))
+    ? extractInheritedPluginConfig(await fs.readFile(sourceConfigPath, "utf8"))
+    : "";
+  const next = buildCleanConfig(windowsSandboxMode, inheritedPluginConfig);
   if (await pathExists(configPath)) {
     const current = await fs.readFile(configPath, "utf8");
     if (current === next) {
@@ -125,7 +134,10 @@ async function writeCleanConfig(
   return "created";
 }
 
-export function buildCleanConfig(windowsSandboxMode: "elevated" | "unelevated" | "inherit"): string {
+export function buildCleanConfig(
+  windowsSandboxMode: "elevated" | "unelevated" | "inherit",
+  inheritedPluginConfig = "",
+): string {
   const lines = [
     'model = "gpt-5.5"',
     'model_reasoning_effort = "high"',
@@ -148,7 +160,47 @@ export function buildCleanConfig(windowsSandboxMode: "elevated" | "unelevated" |
     lines.push("", "[windows]", `sandbox = "${windowsSandboxMode}"`);
   }
 
+  const inherited = inheritedPluginConfig.trim();
+  if (inherited.length > 0) {
+    lines.push("", inherited);
+  }
+
   return `${lines.join("\n")}\n`;
+}
+
+export function extractInheritedPluginConfig(source: string): string {
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const sections: string[] = [];
+  let current: string[] | null = null;
+
+  for (const line of lines) {
+    const heading = line.trim();
+    const isHeading = /^\[[^\]]+\]$/.test(heading);
+
+    if (isHeading) {
+      current = shouldInheritPluginSection(heading) ? [line] : null;
+      if (current) {
+        sections.push(current.join("\n"));
+      }
+      continue;
+    }
+
+    if (current) {
+      current.push(line);
+      sections[sections.length - 1] = current.join("\n");
+    }
+  }
+
+  return sections.map((section) => section.trimEnd()).join("\n\n");
+}
+
+function shouldInheritPluginSection(heading: string): boolean {
+  return (
+    heading.startsWith("[plugins.") ||
+    heading.startsWith("[marketplaces.") ||
+    heading.startsWith("[mcp_servers.") ||
+    heading.startsWith("[apps.")
+  );
 }
 
 export function upsertWindowsSandboxMode(source: string, mode: "elevated" | "unelevated"): string {
@@ -204,6 +256,32 @@ async function copyWindowsSandboxAssets(
     copied[`.sandbox/${fileName}`] = await copyFileIfMissing(
       path.join(realCodexHome, ".sandbox", fileName),
       path.join(profileCodexHome, ".sandbox", fileName),
+      dryRun,
+    );
+  }
+
+  return copied;
+}
+
+async function copyPluginSupportAssets(
+  realCodexHome: string,
+  profileCodexHome: string,
+  dryRun: boolean,
+): Promise<Record<string, SetupStatus>> {
+  const copied: Record<string, SetupStatus> = {};
+
+  for (const directoryName of ["plugins", "browser", "computer-use", "node_repl", "vendor_imports"]) {
+    copied[directoryName] = await copyDirIfMissing(
+      path.join(realCodexHome, directoryName),
+      path.join(profileCodexHome, directoryName),
+      dryRun,
+    );
+  }
+
+  for (const fileName of ["chrome-native-hosts-v2.json", "chrome-native-hosts.json"]) {
+    copied[fileName] = await copyFileIfMissing(
+      path.join(realCodexHome, fileName),
+      path.join(profileCodexHome, fileName),
       dryRun,
     );
   }

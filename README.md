@@ -62,9 +62,9 @@ By default it copies only:
 
 - `~/.codex/auth.json`
 
-into the classroom profile, then writes a sterile classroom `config.toml`. It does not copy sessions, automations, plugins, skills, local state databases, or Desktop app state.
+into the classroom profile, then writes a classroom `config.toml` that inherits plugin configuration while keeping the teaching surface clean. It does not copy sessions, automations, projects, skills, local thread history, or Desktop app state.
 
-The classroom config keeps the class profile signed in with your existing Codex account, but starts from a low-noise setup without copying your personal skills, plugin installs, sessions, or automations. Plugin, browser, computer-use, and app connector capabilities stay enabled so you can configure them live during class. The CLI reapplies this config on every `init` and `enter` unless you use `--copy-config`, so app-generated config changes from a previous class do not leak into the next class start.
+The classroom config keeps the class profile signed in with your existing Codex account and carries over your installed plugin setup, browser/computer-use support, marketplaces, MCP server entries, and app connector entries. Skills are intentionally reset so you can teach installing and creating them from a clean slate. The CLI reapplies this config on every `init` and `enter` unless you use `--copy-config`, so app-generated config changes from a previous class do not leak into the next class start.
 
 Skip auth copying or copy your real config instead:
 
@@ -91,6 +91,8 @@ codex-classroom init intro --copy-windows-sandbox
 ```
 
 Codex may still generate caches, sqlite files, bundled plugin support files, and system folders inside the classroom profile after first launch. Those generated files stay in the profile and do not contaminate your real Codex state.
+
+Plugin inheritance is selective. It copies plugin-related config sections and local plugin support caches, but still excludes `skills`, `sessions`, `automations`, `projects`, `memories`, and `secrets`. If a specific connector still asks for authentication, its credential is stored somewhere outside the plugin config and should be handled case by case.
 
 To copy your daily config, including your existing plugins and skills:
 
@@ -261,11 +263,12 @@ Profile layout:
 - It only manages profile and backup paths inside the classroom root.
 - It refuses to reset paths outside the classroom root.
 - It never prints token values.
-- It generates a clean classroom config by default instead of copying your daily config.
+- It generates a classroom config by default instead of copying your daily config wholesale.
+- It inherits plugin setup while resetting skills.
 - `--dry-run` is available for commands that move or launch.
 - `--json` output is intended for scripts and automation.
 
-The one sensitive default operation is copying `auth.json`. That lets the classroom profile use your existing Codex login, but the copied file remains sensitive and should not be committed or shared. If you pass `--copy-config`, your real `config.toml` may also contain private paths or plugin configuration.
+The sensitive default operations are copying `auth.json` and plugin support state. That lets the classroom profile use your existing Codex login and plugin setup, but the copied files remain sensitive and should not be committed or shared. If you pass `--copy-config`, your real `config.toml` may also contain private paths, projects, and other daily-work configuration.
 
 ## Important Limitation
 

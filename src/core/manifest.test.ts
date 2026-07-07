@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import type { ProfileManifest } from "../types.js";
 import { defaultManifest, validateManifest } from "./manifest.js";
-import { buildCleanConfig, upsertWindowsSandboxMode } from "./profiles.js";
+import { buildCleanConfig, extractInheritedPluginConfig, upsertWindowsSandboxMode } from "./profiles.js";
 
 test("defaultManifest creates a clean classroom manifest", () => {
   const manifest = defaultManifest("intro");
@@ -15,7 +15,7 @@ test("defaultManifest creates a clean classroom manifest", () => {
   assert.equal(manifest.windowsSandboxMode, "inherit");
   assert.equal(manifest.features.sessions, "empty");
   assert.equal(manifest.features.automations, "empty");
-  assert.equal(manifest.features.plugins, "empty");
+  assert.equal(manifest.features.plugins, "inherit");
   assert.equal(manifest.features.skills, "empty");
 });
 
@@ -34,6 +34,46 @@ test("buildCleanConfig can request Windows sandbox setup", () => {
   const config = buildCleanConfig("unelevated");
 
   assert.match(config, /\[windows\]\nsandbox = "unelevated"/);
+});
+
+test("buildCleanConfig can append inherited plugin config", () => {
+  const config = buildCleanConfig("inherit", '[plugins."browser@openai-bundled"]\nenabled = true\n');
+
+  assert.match(config, /\[features\]\nskills = false/);
+  assert.match(config, /\[plugins\."browser@openai-bundled"\]\nenabled = true/);
+});
+
+test("extractInheritedPluginConfig keeps plugin sections and drops projects", () => {
+  const source = [
+    'model = "test"',
+    "",
+    "[features]",
+    "skills = true",
+    "",
+    '[plugins."gmail@openai-curated"]',
+    "enabled = true",
+    "",
+    "[marketplaces.openai-bundled]",
+    'source_type = "local"',
+    "",
+    "[mcp_servers.node_repl.env]",
+    'CODEX_HOME = "C:/Users/Alonso/.codex"',
+    "",
+    "[projects.'C:/private']",
+    'trust_level = "trusted"',
+    "",
+    '[apps.connector_abc.tools."google_drive.read"]',
+    "enabled = true",
+  ].join("\n");
+
+  const inherited = extractInheritedPluginConfig(source);
+
+  assert.match(inherited, /\[plugins\."gmail@openai-curated"\]/);
+  assert.match(inherited, /\[marketplaces\.openai-bundled\]/);
+  assert.match(inherited, /\[mcp_servers\.node_repl\.env\]/);
+  assert.match(inherited, /\[apps\.connector_abc\.tools\."google_drive.read"\]/);
+  assert.doesNotMatch(inherited, /\[features\]/);
+  assert.doesNotMatch(inherited, /\[projects\./);
 });
 
 test("validateManifest rejects unsupported feature values", () => {

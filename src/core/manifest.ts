@@ -11,7 +11,7 @@ export function defaultManifest(profileName: string): ProfileManifest {
     features: {
       sessions: "empty",
       automations: "empty",
-      plugins: "empty",
+      plugins: "inherit",
       skills: "empty",
     },
   };
