@@ -41,7 +41,7 @@ export async function enterCommand(context: CommandContext, args: string[]): Pro
     copyAuth: context.options.copyAuth ?? true,
     copyConfig: context.options.copyConfig ?? false,
     copyWindowsSandbox: context.options.copyWindowsSandbox ?? false,
-    windowsSandboxMode: context.options.windowsSandboxMode ?? (process.platform === "win32" ? "unelevated" : "inherit"),
+    windowsSandboxMode: context.options.windowsSandboxMode ?? "inherit",
     dryRun: context.options.dryRun,
   });
 

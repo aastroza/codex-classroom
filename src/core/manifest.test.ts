@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import type { ProfileManifest } from "../types.js";
 import { defaultManifest, validateManifest } from "./manifest.js";
 import { buildCleanConfig, upsertWindowsSandboxMode } from "./profiles.js";
 
@@ -11,9 +12,11 @@ test("defaultManifest creates a clean classroom manifest", () => {
   assert.equal(manifest.copyAuth, true);
   assert.equal(manifest.copyConfig, false);
   assert.equal(manifest.copyWindowsSandbox, false);
-  assert.equal(manifest.windowsSandboxMode, process.platform === "win32" ? "unelevated" : "inherit");
+  assert.equal(manifest.windowsSandboxMode, "inherit");
   assert.equal(manifest.features.sessions, "empty");
   assert.equal(manifest.features.automations, "empty");
+  assert.equal(manifest.features.plugins, "empty");
+  assert.equal(manifest.features.skills, "empty");
 });
 
 test("buildCleanConfig creates a portable classroom config by default", () => {
@@ -21,6 +24,8 @@ test("buildCleanConfig creates a portable classroom config by default", () => {
 
   assert.match(config, /sandbox_mode = "workspace-write"/);
   assert.match(config, /\[features\]/);
+  assert.match(config, /skills = false/);
+  assert.match(config, /plugins = false/);
   assert.doesNotMatch(config, /\[windows\]/);
 });
 
@@ -59,7 +64,7 @@ test("validateManifest accepts older manifests without sandbox fields", () => {
   const validated = validateManifest(legacy);
 
   assert.equal(validated.copyWindowsSandbox, false);
-  assert.equal(validated.windowsSandboxMode, process.platform === "win32" ? "unelevated" : "inherit");
+  assert.equal(validated.windowsSandboxMode, "inherit");
 });
 
 test("upsertWindowsSandboxMode updates existing windows sandbox setting", () => {

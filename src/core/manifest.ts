@@ -7,12 +7,12 @@ export function defaultManifest(profileName: string): ProfileManifest {
     copyAuth: true,
     copyConfig: false,
     copyWindowsSandbox: false,
-    windowsSandboxMode: process.platform === "win32" ? "unelevated" : "inherit",
+    windowsSandboxMode: "inherit",
     features: {
       sessions: "empty",
       automations: "empty",
-      plugins: "minimal",
-      skills: "minimal",
+      plugins: "empty",
+      skills: "empty",
     },
   };
 }
@@ -25,7 +25,7 @@ export function validateManifest(value: ProfileManifest): ProfileManifest {
   const manifest = {
     ...value,
     copyWindowsSandbox: value.copyWindowsSandbox ?? false,
-    windowsSandboxMode: value.windowsSandboxMode ?? (process.platform === "win32" ? "unelevated" : "inherit"),
+    windowsSandboxMode: value.windowsSandboxMode ?? "inherit",
   };
 
   if (typeof manifest.name !== "string" || manifest.name.length === 0) {

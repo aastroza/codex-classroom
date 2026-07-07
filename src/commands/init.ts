@@ -9,7 +9,7 @@ export async function initCommand(context: CommandContext, args: string[]): Prom
   const copyAuth = context.options.copyAuth ?? true;
   const copyConfig = context.options.copyConfig ?? false;
   const copyWindowsSandbox = context.options.copyWindowsSandbox ?? false;
-  const windowsSandboxMode = context.options.windowsSandboxMode ?? (process.platform === "win32" ? "unelevated" : "inherit");
+  const windowsSandboxMode = context.options.windowsSandboxMode ?? "inherit";
 
   if (args.length > 1) {
     throw new CliError("init accepts at most one profile name.");

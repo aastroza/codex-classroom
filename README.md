@@ -62,9 +62,9 @@ By default it copies only:
 
 - `~/.codex/auth.json`
 
-into the classroom profile, then writes a clean classroom `config.toml`. It does not copy sessions, automations, plugins, skills, local state databases, or Desktop app state.
+into the classroom profile, then writes a sterile classroom `config.toml`. It does not copy sessions, automations, plugins, skills, local state databases, or Desktop app state.
 
-The clean config keeps the class profile signed in with your existing Codex account, but starts from a low-noise setup. Plugins and skills configured during class stay inside the classroom profile and are restored away from your real setup after `restore`.
+The sterile config keeps the class profile signed in with your existing Codex account, but starts from a low-noise setup with skills, plugins, browser tools, computer-use tools, and app connectors disabled. Plugins and skills configured during class stay inside the classroom profile and are restored away from your real setup after `restore`.
 
 Skip auth copying or copy your real config instead:
 
@@ -73,23 +73,29 @@ codex-classroom init intro --no-copy-auth
 codex-classroom init intro --copy-config
 ```
 
-On Windows, the default clean config sets:
+By default, the clean config does not write a `[windows]` sandbox section. That leaves the class profile as close to first-run state as the app allows.
 
-```toml
-[windows]
-sandbox = "unelevated"
-```
-
-That keeps the sandbox setup visible for teaching while avoiding the elevated ACL path unless you ask for it:
+To explicitly show Windows sandbox setup during class, request a Windows sandbox mode:
 
 ```sh
 codex-classroom init intro --windows-sandbox-mode elevated
+codex-classroom init intro --windows-sandbox-mode unelevated
 ```
+
+Use `elevated` when you want to demonstrate the elevated Windows setup path. Use `unelevated` when you want the Windows sandbox setting present but with fewer Windows ACL prompts.
 
 If you want to avoid showing Windows sandbox setup and reuse the existing local sandbox support files:
 
 ```sh
 codex-classroom init intro --copy-windows-sandbox
+```
+
+Codex may still generate caches, sqlite files, and bundled system folders inside the classroom profile after first launch. Those generated files stay in the profile and do not contaminate your real Codex state.
+
+To copy your daily config, including your existing plugins and skills:
+
+```sh
+codex-classroom init intro --copy-config
 ```
 
 ### `enter`
