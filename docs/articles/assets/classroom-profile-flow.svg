@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">Classroom profile loop</title>
+  <desc id="desc">A clean classroom profile temporarily replaces the daily Codex workspace, then restores it after class.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#101820"/>
+      <stop offset="100%" stop-color="#183225"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" x2="1">
+      <stop offset="0%" stop-color="#65d6ad"/>
+      <stop offset="100%" stop-color="#f4c95d"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="560" rx="28" fill="url(#bg)"/>
+  <text x="72" y="82" fill="#f7f3ea" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="42" font-weight="760">Classroom profiles</text>
+  <text x="74" y="122" fill="#c7c0b5" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20">Same account. Clean class state. Simple restore.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="72" y="198" width="280" height="190" rx="20" fill="#f7f3ea"/>
+    <text x="104" y="244" fill="#17202a" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="760">Daily workspace</text>
+    <rect x="104" y="282" width="164" height="13" rx="7" fill="#5967d8"/>
+    <rect x="104" y="312" width="202" height="13" rx="7" fill="#7b8aa6"/>
+    <rect x="104" y="342" width="138" height="13" rx="7" fill="#7b8aa6"/>
+  </g>
+
+  <path d="M386 292 H512" stroke="url(#accent)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M498 270 L526 292 L498 314" fill="none" stroke="#f4c95d" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g filter="url(#shadow)">
+    <rect x="548" y="176" width="304" height="232" rx="22" fill="#16222b" stroke="#6c7b72" stroke-width="2"/>
+    <text x="584" y="226" fill="#f7f3ea" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="25" font-weight="760">Classroom profile</text>
+    <circle cx="616" cy="284" r="18" fill="#65d6ad"/>
+    <rect x="650" y="274" width="142" height="18" rx="9" fill="#dce8ef"/>
+    <rect x="584" y="326" width="188" height="13" rx="7" fill="#7c8b86"/>
+    <rect x="584" y="354" width="126" height="13" rx="7" fill="#7c8b86"/>
+  </g>
+
+  <path d="M886 292 H1012" stroke="url(#accent)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M998 270 L1026 292 L998 314" fill="none" stroke="#f4c95d" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g filter="url(#shadow)">
+    <rect x="1026" y="216" width="118" height="150" rx="20" fill="#f4c95d"/>
+    <text x="1050" y="280" fill="#181818" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20" font-weight="800">Restore</text>
+    <text x="1050" y="310" fill="#181818" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20" font-weight="800">state</text>
+  </g>
+
+  <path d="M1088 410 C914 506 320 506 178 414" fill="none" stroke="#f4c95d" stroke-width="7" stroke-linecap="round"/>
+  <path d="M188 445 L156 398 L212 402" fill="none" stroke="#f4c95d" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

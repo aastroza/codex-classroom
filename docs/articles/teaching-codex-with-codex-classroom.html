@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Teaching Codex without overwhelming the room</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #181716;
+        --muted: #625b52;
+        --paper: #f8f4ec;
+        --panel: #ffffff;
+        --line: #ddd3c4;
+        --green: #16765d;
+        --gold: #b78610;
+        --dark: #151515;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        line-height: 1.62;
+      }
+
+      a {
+        color: var(--green);
+        text-decoration-thickness: 0.08em;
+        text-underline-offset: 0.18em;
+      }
+
+      .hero {
+        position: relative;
+        overflow: hidden;
+        min-height: 92vh;
+        display: grid;
+        align-items: end;
+        padding: 56px 24px 0;
+        background: #111311;
+        color: #fffaf0;
+      }
+
+      .hero::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(90deg, rgba(17, 19, 17, 0.98) 0%, rgba(17, 19, 17, 0.82) 45%, rgba(17, 19, 17, 0.45) 100%),
+          url("assets/classroom-profile-flow.svg") center / cover no-repeat;
+        opacity: 0.62;
+      }
+
+      .hero::after {
+        content: "";
+        position: absolute;
+        inset: auto 0 0;
+        height: 34%;
+        background: linear-gradient(180deg, rgba(17, 19, 17, 0), #111311);
+      }
+
+      .hero-inner {
+        position: relative;
+        z-index: 1;
+        width: min(1040px, 100%);
+        margin: 0 auto;
+        padding-bottom: 84px;
+      }
+
+      .kicker {
+        margin: 0 0 18px;
+        color: #f4c95d;
+        font-size: 0.88rem;
+        font-weight: 760;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 940px;
+        margin: 0;
+        font-size: clamp(3rem, 6vw, 5.9rem);
+        line-height: 0.96;
+        letter-spacing: 0;
+      }
+
+      .dek {
+        max-width: 780px;
+        margin: 28px 0 0;
+        color: #efe6d8;
+        font-size: clamp(1.2rem, 2vw, 1.55rem);
+      }
+
+      main {
+        width: min(1040px, calc(100% - 40px));
+        margin: 0 auto;
+      }
+
+      article {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 44px;
+        padding: 72px 0 96px;
+      }
+
+      section {
+        display: block;
+      }
+
+      .content {
+        max-width: 760px;
+        margin: 0 auto;
+      }
+
+      h2 {
+        margin: 0 0 22px;
+        font-size: clamp(2rem, 4vw, 3.25rem);
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+
+      p {
+        margin: 0 0 20px;
+        font-size: 1.12rem;
+      }
+
+      .lead {
+        font-size: 1.28rem;
+        color: #332f2a;
+      }
+
+      ul {
+        margin: 20px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      li {
+        position: relative;
+        margin: 0 0 12px;
+        padding-left: 28px;
+        font-size: 1.08rem;
+      }
+
+      li::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0.72em;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: var(--green);
+      }
+
+      figure {
+        margin: 22px 0 8px;
+      }
+
+      .wide {
+        max-width: none;
+      }
+
+      .media {
+        display: block;
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: 0 24px 60px rgba(48, 38, 24, 0.13);
+      }
+
+      figcaption {
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+
+      code {
+        padding: 0.12em 0.35em;
+        border-radius: 6px;
+        background: #eee4d4;
+        color: #30281f;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 0.9em;
+      }
+
+      .closing {
+        padding: 56px;
+        border-radius: 24px;
+        background: var(--dark);
+        color: #fff8ea;
+      }
+
+      .closing p {
+        color: #eadfce;
+      }
+
+      @media (max-width: 820px) {
+        .hero {
+          min-height: 86vh;
+          padding: 36px 20px 0;
+        }
+
+        .hero-inner {
+          padding-bottom: 58px;
+        }
+
+        .closing {
+          padding: 30px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero-inner">
+        <p class="kicker">Codex Classroom</p>
+        <h1>Teaching Codex without overwhelming the room</h1>
+        <p class="dek">
+          A small toolkit that starts every Codex class from a clean workspace,
+          and lets Codex speak up when the work gets too complex to follow.
+        </p>
+      </div>
+    </header>
+
+    <main>
+      <article>
+        <section>
+          <div class="content">
+            <p class="lead">
+              I have been teaching more and more classes about the Codex app.
+              Some students are developers. Many are not. That difference
+              matters.
+            </p>
+            <p>
+              A technical audience reads a busy Codex workspace as proof:
+              projects, threads, skills, automations, plugins, long-running
+              agents. It signals a tool built for serious work. A nontechnical
+              audience reads the same screen as a warning: this isn't for me.
+            </p>
+            <p>
+              <a href="https://github.com/aastroza/codex-classroom"><code>codex-classroom</code></a> exists to fix that.
+            </p>
+            <p>
+              It's a small toolkit for teaching Codex live. I built it fast,
+              because I needed it for real classes, and rough as it is, it
+              already changed how I teach.
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <div class="content wide">
+            <h2>Start with an empty room</h2>
+            <p>
+              The first feature is classroom profiles. Before class, I swap my
+              normal Codex state for a clean one. Students see a fresh app,
+              not my daily workspace.
+            </p>
+            <p>
+              My real environment is full of things useful to me and
+              distracting to a beginner: old chats, active projects, installed
+              skills, plugin setup, automations, habits baked into the
+              interface. For a room with people who don't code, all of that
+              is noise.
+            </p>
+            <p>
+              I also want to teach from my Pro account, because that is where I
+              can use Codex the way I actually use it: stronger models, configured
+              plugins, higher limits, subagents, and Fast mode. I want to push the
+              tool hard during class without paying for a second Pro account just
+              to keep the screen clean. In a classroom, speed isn't a luxury.
+              Waiting breaks attention.
+            </p>
+            <figure>
+              <img
+                class="media"
+                src="assets/codex-fresh-start.png"
+                alt="Screenshot of a clean Codex startup screen showing a Windows setup prompt."
+              />
+              <figcaption>
+                The fresh profile can surface first-run setup moments that are
+                worth teaching instead of hiding.
+              </figcaption>
+            </figure>
+            <p>
+              The effect is small but real. I start from zero without
+              pretending to be a new user, and show students the exact
+              friction they'll hit on day one: workspace setup, sandbox
+              setup, choosing a project folder, deciding what Codex can
+              touch.
+            </p>
+            <p>
+              Once that moment passes, I drop the classroom profile and
+              restore my real workspace. Start gentle. Show the advanced
+              loops, skills, and automations later.
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <div class="content wide">
+            <h2>Let Codex speak for itself</h2>
+            <p>
+              The second feature is Codex Voice. Long Codex threads are brutal
+              to teach live. A good workshop can run a 20 or 30 minute agent
+              loop: Codex inspects a codebase, runs commands, hits errors,
+              fixes tests, revises files, checks its own work. That's exactly
+              why Codex is useful, it stays in the loop while the class thinks
+              at a higher level. The hard part is helping the room track what
+              matters while it runs.
+            </p>
+            <p>
+              Students can't read every update at Codex speed. Many don't know
+              the vocabulary yet. Even the ones who do face a wall of text, a
+              bad classroom interface.
+            </p>
+            <p>I wanted Codex to speak.</p>
+            <p>
+              Codex Voice runs on
+              <a href="https://developers.openai.com/api/docs/models/gpt-realtime-2.1-mini"><code>gpt-realtime-2.1-mini</code></a>,
+              OpenAI's low-latency voice and text model. The browser opens a
+              live audio session. A Codex skill sends compact cues about what's
+              happening in the thread, and the model turns those cues into short
+              spoken updates.
+            </p>
+            <figure>
+              <img
+                class="media"
+                src="assets/codex-voice-ui.png"
+                alt="Screenshot of the Codex Voice browser interface."
+              />
+              <figcaption>
+                The voice UI stays separate from Codex Desktop so it can work
+                through a normal browser audio session.
+              </figcaption>
+            </figure>
+            <p>
+              The teacher talks to it too, and that part matters. I didn't
+              want a one-way audio feed. I wanted a conversation between the
+              professor, Codex, and the room.
+            </p>
+            <p>
+              It listens while I explain, stays quiet on command, resumes
+              when useful, and answers questions about the current thread. A
+              small context bridge feeds it a compact view of the work:
+              prompts, commands, tool results, checks, recent cues. It
+              doesn't need every token. It needs the right fragment, updated
+              often enough to answer the professor and keep the class
+              oriented.
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <div class="content closing">
+            <h2>What I've learned so far</h2>
+            <p>
+              Both features came from the same problem: watching students
+              check out before the real lesson started. A clean profile buys
+              the first ten minutes. Codex Voice buys the next thirty.
+            </p>
+            <p>
+              Neither one teaches the class. I still explain the codebase,
+              write the exercises, watch the room. <code>codex-classroom</code>
+              just removes two specific reasons students stop following
+              before that work begins.
+            </p>
+            <p>
+              I built it fast, I use it in real classes, and I'm still
+              finding out what breaks.
+            </p>
+          </div>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>
