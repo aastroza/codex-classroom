@@ -22,6 +22,8 @@ While Codex works, it speaks short updates about the parts students need to noti
 
 The narrator uses `gpt-realtime-2.1-mini` as a voice companion. It listens while the teacher explains, stays quiet when asked, and resumes when narration is useful again. This helps students who cannot read the terminal, file diffs, and chat stream fast enough during a live demo.
 
+Read the guide: [Live narration](docs/live-narration.md).
+
 ## Thread replay videos
 
 Thread replay turns a completed Codex thread into a video lesson.

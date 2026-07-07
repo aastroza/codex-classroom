@@ -5,6 +5,14 @@ export interface GlobalOptions {
   classroomRoot?: string;
   realCodexHome?: string;
   desktopStateHome?: string;
+  narratorHost?: string;
+  narratorPort?: string;
+  narratorModel?: string;
+  narratorVoice?: string;
+  narratorLanguage?: string;
+  narratorApiKeyEnv?: string;
+  narratorSafetyIdentifier?: string;
+  narratorOpen?: boolean;
   copyAuth?: boolean;
   copyConfig?: boolean;
   copyWindowsSandbox?: boolean;
