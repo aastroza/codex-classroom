@@ -517,7 +517,6 @@ function renderVoicePage(options: VoiceOptions): string {
       }));
       dc.send(JSON.stringify({
         type: "response.create",
-        response: { modalities: ["audio", "text"] },
       }));
     }
 
