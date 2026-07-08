@@ -7,10 +7,12 @@ import { fileURLToPath } from "node:url";
 
 import type { CommandContext } from "../types.js";
 import { AppServerClient, checkAppServerAvailable } from "../core/app-server-client.js";
+import { isDuplicateText, type ClassroomMoment } from "../core/classroom.js";
+import { maybeAutoNarrateMoment } from "../core/classroom-templates.js";
 import { CliError } from "../core/errors.js";
 import { mapThreadSnapshot, type MappedAppServerEvent, type PresentEvent } from "../core/event-mapper.js";
 import { pathExists } from "../core/fs.js";
-import { RolloutWatcher, type RolloutMappedEvent } from "../core/rollout-watcher.js";
+import { mapRolloutText, RolloutWatcher, type RolloutMappedEvent } from "../core/rollout-watcher.js";
 import {
   appendVoiceContextEvent,
   buildThreadBrief,
@@ -50,6 +52,27 @@ interface VoiceOptions {
   safetyIdentifier?: string;
   open: boolean;
   contextSource: "app-server" | "hooks" | "both";
+  replayFile?: string;
+  autoNarrate: boolean;
+}
+
+interface VoiceServerState {
+  options: VoiceOptions;
+  classroomRoot: string;
+  apiKey?: string;
+  token: string;
+  clients: Set<ServerResponse>;
+  cueHistory: VoiceCue[];
+  contextHistory: VoiceContextEvent[];
+  presentHistory: PresentEvent[];
+  momentHistory: ClassroomMoment[];
+  appServer: AppServerClient | null;
+  rolloutWatcher: RolloutWatcher | null;
+  paused: boolean;
+  lastExplicitCueAt: number;
+  lastSpokenCueText?: string;
+  appServerThreadProbeDisabled: boolean;
+  loggedAppServerThreadProbeError: boolean;
 }
 
 const CODEX_VOICE_SKILL_NAME = "codex-voice";
@@ -142,6 +165,8 @@ function getVoiceOptions(context: CommandContext): VoiceOptions {
     safetyIdentifier: context.options.voiceSafetyIdentifier,
     open: context.options.voiceOpen ?? true,
     contextSource: context.options.voiceContextSource ?? "app-server",
+    replayFile: context.options.voiceReplayFile,
+    autoNarrate: context.options.voiceAutoNarrate ?? true,
   };
 }
 
@@ -171,6 +196,7 @@ async function voiceDoctor(context: CommandContext, options: VoiceOptions): Prom
     await checkCliOnPath(),
     await checkApiKey(options.apiKeyEnv),
     await checkAppServer(),
+    await checkAppServerThreads(context.paths.realCodexHome),
     await checkSkillInstalled(context.paths.realCodexHome),
     await checkVoiceSidecar(options),
     await checkVoiceHook(context.paths.realCodexHome),
@@ -262,8 +288,9 @@ async function startVoice(
   const cueHistory: VoiceCue[] = [];
   const contextHistory = await readVoiceContextEvents(context.paths.classroomRoot, 40);
   const presentHistory: PresentEvent[] = [];
+  const momentHistory: ClassroomMoment[] = [];
   const token = createVoiceToken();
-  const serverState = {
+  const serverState: VoiceServerState = {
     options,
     classroomRoot: context.paths.classroomRoot,
     apiKey,
@@ -272,8 +299,14 @@ async function startVoice(
     cueHistory,
     contextHistory,
     presentHistory,
+    momentHistory,
     appServer: null as AppServerClient | null,
     rolloutWatcher: null as RolloutWatcher | null,
+    paused: false,
+    lastExplicitCueAt: 0,
+    lastSpokenCueText: undefined,
+    appServerThreadProbeDisabled: false,
+    loggedAppServerThreadProbeError: false,
   };
   const server = http.createServer(async (request, response) => {
     try {
@@ -296,10 +329,13 @@ async function startVoice(
     token,
     startedAt: new Date().toISOString(),
   });
-  const appServer = shouldUseAppServer(options) ? await startAppServerBridge(context, options, clients, cueHistory, contextHistory, presentHistory, startOptions.threadId) : null;
-  const rolloutWatcher = await startRolloutBridge(context, clients, contextHistory, presentHistory, startOptions.threadId);
+  const appServer = shouldUseAppServer(options) ? await startAppServerBridge(context, serverState, startOptions.threadId) : null;
+  const rolloutWatcher = await startRolloutBridge(context, serverState, startOptions.threadId);
   serverState.appServer = appServer;
   serverState.rolloutWatcher = rolloutWatcher;
+  if (options.replayFile) {
+    startReplay(context, serverState, options.replayFile);
+  }
   if (context.options.json) {
     context.output.json({ ok: true, url, presentUrl: `${url}/present`, model: options.model, voice: options.voice });
   } else {
@@ -307,6 +343,7 @@ async function startVoice(
     context.output.info(`Presentation panel: ${url}/present`);
     context.output.info(`Model: ${options.model}`);
     context.output.info(`Voice: ${options.voice}`);
+    context.output.info(`Auto narration: ${options.autoNarrate ? "on" : "off"}`);
     context.output.info(appServer ? "Context source: app-server + Desktop sessions" : "Context source: Desktop sessions");
     context.output.info("Send cues with: codex-classroom voice say \"short update\"");
     context.output.info("Press Ctrl+C to stop.");
@@ -328,18 +365,7 @@ async function startVoice(
 async function routeRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  state: {
-    options: VoiceOptions;
-    classroomRoot: string;
-    apiKey?: string;
-    clients: Set<ServerResponse>;
-    cueHistory: VoiceCue[];
-    contextHistory: VoiceContextEvent[];
-    presentHistory: PresentEvent[];
-    token: string;
-    appServer: AppServerClient | null;
-    rolloutWatcher: RolloutWatcher | null;
-  },
+  state: VoiceServerState,
 ): Promise<void> {
   const localError = validateLocalRequest(request, state.options.host, state.options.port);
   if (localError) {
@@ -369,6 +395,9 @@ async function routeRequest(
     }
     for (const event of state.presentHistory.slice(-30)) {
       response.write(`event: present\ndata: ${JSON.stringify(event)}\n\n`);
+    }
+    for (const moment of state.momentHistory.slice(-30)) {
+      response.write(`event: moment\ndata: ${JSON.stringify(moment)}\n\n`);
     }
     state.clients.add(response);
     request.on("close", () => {
@@ -408,22 +437,7 @@ async function routeRequest(
     }
     const payload = await readJson(request);
     const cue = normalizeCue(payload);
-    const event = await appendVoiceContextEvent(state.classroomRoot, {
-      source: "cue",
-      kind: cue.kind,
-      title: `Voice cue: ${cue.kind}`,
-      summary: cue.text || cue.kind,
-      at: cue.at,
-    });
-    state.cueHistory.push(cue);
-    state.contextHistory.push(event);
-    const presentEvent: PresentEvent = { type: "subtitle", text: cue.text || cue.kind };
-    state.presentHistory.push(presentEvent);
-    for (const client of state.clients) {
-      client.write(`event: cue\ndata: ${JSON.stringify(cue)}\n\n`);
-      client.write(`event: context\ndata: ${JSON.stringify(event)}\n\n`);
-      client.write(`event: present\ndata: ${JSON.stringify(presentEvent)}\n\n`);
-    }
+    await publishCue(state, cue, { explicit: true });
     sendJson(response, 200, { ok: true, cue });
     return;
   }
@@ -490,13 +504,10 @@ function shouldUseAppServer(options: VoiceOptions): boolean {
 
 async function startAppServerBridge(
   context: CommandContext,
-  options: VoiceOptions,
-  clients: Set<ServerResponse>,
-  cueHistory: VoiceCue[],
-  contextHistory: VoiceContextEvent[],
-  presentHistory: PresentEvent[],
+  state: VoiceServerState,
   initialThreadId?: string,
 ): Promise<AppServerClient | null> {
+  const options = state.options;
   const client = new AppServerClient();
   try {
     await client.start();
@@ -510,36 +521,34 @@ async function startAppServerBridge(
   }
 
   client.onMappedEvent((mapped) => {
-    void handleMappedAppServerEvent(context, clients, cueHistory, contextHistory, presentHistory, mapped);
+    void handleMappedAppServerEvent(context, state, mapped);
   });
 
   if (initialThreadId) {
-    await attachThread(client, presentHistory, clients, initialThreadId).catch((error) => {
-      context.output.warn(`Could not attach thread ${initialThreadId}: ${error instanceof Error ? error.message : String(error)}`);
+    await attachThread(client, state, initialThreadId).catch((error) => {
+      handleAppServerAttachError(context, state, error);
     });
   } else {
-    await attachFirstLoadedThread(client, presentHistory, clients).catch(() => {
+    await attachFirstLoadedThread(client, state).catch(() => {
       // The present panel still works with manual cues if there is no loaded thread yet.
     });
   }
 
-  startLoadedThreadPolling(client, presentHistory, clients);
+  startLoadedThreadPolling(context, client, state);
 
   return client;
 }
 
 async function startRolloutBridge(
   context: CommandContext,
-  clients: Set<ServerResponse>,
-  contextHistory: VoiceContextEvent[],
-  presentHistory: PresentEvent[],
+  state: VoiceServerState,
   initialThreadId?: string,
 ): Promise<RolloutWatcher | null> {
   const watcher = new RolloutWatcher({
     codexHome: context.paths.realCodexHome,
     since: new Date(),
     onEvent: async (event) => {
-      await handleRolloutEvent(context, clients, contextHistory, presentHistory, event);
+      await handleRolloutEvent(context, state, event);
     },
   });
 
@@ -554,21 +563,19 @@ async function startRolloutBridge(
 }
 
 async function attachThreadEverywhere(
-  state: {
-    appServer: AppServerClient | null;
-    rolloutWatcher: RolloutWatcher | null;
-    presentHistory: PresentEvent[];
-    clients: Set<ServerResponse>;
-  },
+  state: VoiceServerState,
   threadId: string,
 ): Promise<boolean> {
   let attached = false;
-  if (state.appServer) {
+  if (state.appServer && !state.appServerThreadProbeDisabled) {
     try {
-      const snapshot = await state.appServer.resumeThread(threadId);
+      const snapshot = await state.appServer.readThread(threadId);
       hydratePresentFromSnapshot(state.presentHistory, state.clients, snapshot);
       attached = true;
-    } catch {
+    } catch (error) {
+      if (isDesktopRolloutReadError(error)) {
+        state.appServerThreadProbeDisabled = true;
+      }
       // Desktop-created threads are often only readable from rollout files.
     }
   }
@@ -580,21 +587,23 @@ async function attachThreadEverywhere(
   return attached;
 }
 
-async function attachFirstLoadedThread(client: AppServerClient, presentHistory: PresentEvent[], clients: Set<ServerResponse>): Promise<void> {
+async function attachFirstLoadedThread(client: AppServerClient, state: VoiceServerState): Promise<void> {
   const loaded = await client.loadedThreads();
   const data = loaded && typeof loaded === "object" ? (loaded as { data?: unknown }).data : undefined;
   if (!Array.isArray(data) || typeof data[0] !== "string") {
     return;
   }
-  await attachThread(client, presentHistory, clients, data[0]);
+  await attachThread(client, state, data[0]);
 }
 
-async function attachThread(client: AppServerClient, presentHistory: PresentEvent[], clients: Set<ServerResponse>, threadId: string): Promise<void> {
-  const snapshot = await client.resumeThread(threadId);
-  hydratePresentFromSnapshot(presentHistory, clients, snapshot);
+async function attachThread(client: AppServerClient, state: VoiceServerState, threadId: string): Promise<void> {
+  // Probe with thread/read first; Desktop-created rollouts may not match app-server storage.
+  const snapshot = await client.readThread(threadId);
+  hydratePresentFromSnapshot(state.presentHistory, state.clients, snapshot);
+  await client.resumeThread(threadId);
 }
 
-function startLoadedThreadPolling(client: AppServerClient, presentHistory: PresentEvent[], clients: Set<ServerResponse>): void {
+function startLoadedThreadPolling(context: CommandContext, client: AppServerClient, state: VoiceServerState): void {
   let attachedThreadId: string | null = null;
   const timer = setInterval(() => {
     void (async () => {
@@ -605,8 +614,9 @@ function startLoadedThreadPolling(client: AppServerClient, presentHistory: Prese
         return;
       }
       attachedThreadId = threadId;
-      await attachThread(client, presentHistory, clients, threadId);
-    })().catch(() => {
+      await attachThread(client, state, threadId);
+    })().catch((error) => {
+      handleAppServerAttachError(context, state, error);
       // Polling is best-effort; manual attach remains available.
     });
   }, 2000);
@@ -622,46 +632,151 @@ function hydratePresentFromSnapshot(presentHistory: PresentEvent[], clients: Set
 
 async function handleMappedAppServerEvent(
   context: CommandContext,
-  clients: Set<ServerResponse>,
-  cueHistory: VoiceCue[],
-  contextHistory: VoiceContextEvent[],
-  presentHistory: PresentEvent[],
+  state: VoiceServerState,
   mapped: MappedAppServerEvent,
 ): Promise<void> {
   if (mapped.context) {
     const event = await appendVoiceContextEvent(context.paths.classroomRoot, mapped.context);
-    contextHistory.push(event);
-    broadcast(clients, "context", event);
+    state.contextHistory.push(event);
+    broadcast(state.clients, "context", event);
   }
 
   if (mapped.cue) {
-    cueHistory.push(mapped.cue);
-    broadcast(clients, "cue", mapped.cue);
+    await publishCue(state, mapped.cue, { explicit: false });
+  }
+
+  if (mapped.moment) {
+    await publishMoment(context, state, mapped.moment);
   }
 
   if (mapped.present) {
-    presentHistory.push(mapped.present);
-    broadcast(clients, "present", mapped.present);
+    state.presentHistory.push(mapped.present);
+    broadcast(state.clients, "present", mapped.present);
   }
 }
 
 async function handleRolloutEvent(
   context: CommandContext,
-  clients: Set<ServerResponse>,
-  contextHistory: VoiceContextEvent[],
-  presentHistory: PresentEvent[],
+  state: VoiceServerState,
   event: RolloutMappedEvent,
 ): Promise<void> {
   if (event.context) {
     const contextEvent = await appendVoiceContextEvent(context.paths.classroomRoot, event.context);
-    contextHistory.push(contextEvent);
-    broadcast(clients, "context", contextEvent);
+    state.contextHistory.push(contextEvent);
+    broadcast(state.clients, "context", contextEvent);
+  }
+
+  if (event.moment) {
+    await publishMoment(context, state, event.moment);
   }
 
   if (event.present) {
-    presentHistory.push(event.present);
-    broadcast(clients, "present", event.present);
+    // TODO(remove-legacy-present-events): Present now consumes "moment"; keep this for one release.
+    state.presentHistory.push(event.present);
+    broadcast(state.clients, "present", event.present);
   }
+}
+
+async function publishMoment(context: CommandContext, state: VoiceServerState, moment: ClassroomMoment): Promise<void> {
+  const existingIndex = state.momentHistory.findIndex((candidate) => candidate.momentId === moment.momentId);
+  if (existingIndex >= 0) {
+    state.momentHistory[existingIndex] = moment;
+  } else {
+    state.momentHistory.push(moment);
+    state.momentHistory = state.momentHistory.slice(-80);
+  }
+  broadcast(state.clients, "moment", moment);
+
+  const decision = maybeAutoNarrateMoment(moment, {
+    autoNarrate: state.options.autoNarrate,
+    paused: state.paused,
+    lastExplicitCueAt: state.lastExplicitCueAt,
+    lastSpokenText: state.lastSpokenCueText,
+  }, Date.parse(moment.at), isDuplicateText);
+
+  if (decision.dropped && context.options.verbose) {
+    context.output.info(`Dropped duplicate auto cue: ${moment.detail}`);
+  }
+  if (decision.cue) {
+    await publishCue(state, decision.cue, { explicit: false });
+  }
+}
+
+async function publishCue(state: VoiceServerState, cue: VoiceCue, options: { explicit: boolean }): Promise<boolean> {
+  const normalized: VoiceCue = { ...cue, source: cue.source ?? (options.explicit ? "manual" : "cue") };
+  if (normalized.kind === "pause") {
+    state.paused = true;
+  } else if (normalized.kind === "resume") {
+    state.paused = false;
+  }
+  if (options.explicit) {
+    state.lastExplicitCueAt = Date.parse(normalized.at) || Date.now();
+  }
+  if (normalized.text && state.lastSpokenCueText && isDuplicateText(state.lastSpokenCueText, normalized.text)) {
+    return false;
+  }
+
+  state.cueHistory.push(normalized);
+  if (normalized.text) {
+    state.lastSpokenCueText = normalized.text;
+  }
+  const event = await appendVoiceContextEvent(state.classroomRoot, {
+    source: "cue",
+    kind: normalized.kind,
+    title: `Voice cue: ${normalized.kind}`,
+    summary: normalized.text || normalized.kind,
+    at: normalized.at,
+  });
+  state.contextHistory.push(event);
+  const presentEvent: PresentEvent = { type: "subtitle", text: normalized.text || normalized.kind };
+  state.presentHistory.push(presentEvent);
+  broadcast(state.clients, "cue", normalized);
+  broadcast(state.clients, "context", event);
+  broadcast(state.clients, "present", presentEvent);
+  return true;
+}
+
+function handleAppServerAttachError(context: CommandContext, state: VoiceServerState, error: unknown): void {
+  if (!isDesktopRolloutReadError(error)) {
+    if (context.options.verbose) {
+      context.output.warn(`Could not attach app-server thread: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return;
+  }
+  state.appServerThreadProbeDisabled = true;
+  if (!state.loggedAppServerThreadProbeError && context.options.verbose) {
+    state.loggedAppServerThreadProbeError = true;
+    context.output.warn("app-server cannot read Desktop rollouts on this Codex version; using Desktop sessions.");
+  }
+}
+
+export function isDesktopRolloutReadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  // TODO(app-server-schema-alignment): probe error "does not start with session metadata"; real turn/plan/updated events should replace inferred phases when schemas align.
+  return message.includes("does not start with session metadata");
+}
+
+function startReplay(context: CommandContext, state: VoiceServerState, file: string): void {
+  const replayPath = path.resolve(file);
+  void fs.readFile(replayPath, "utf8").then((text) => {
+    const events = mapRolloutText(text);
+    let previousMs: number | null = null;
+    let delay = 250;
+    for (const event of events) {
+      const atMs = event.moment ? Date.parse(event.moment.at) : NaN;
+      if (Number.isFinite(atMs) && previousMs !== null) {
+        delay += Math.min(Math.max((atMs - previousMs) / 5, 40), 2000);
+      }
+      if (Number.isFinite(atMs)) {
+        previousMs = atMs;
+      }
+      setTimeout(() => {
+        void handleRolloutEvent(context, state, event);
+      }, delay).unref();
+    }
+  }).catch((error) => {
+    context.output.warn(`Could not replay ${replayPath}: ${error instanceof Error ? error.message : String(error)}`);
+  });
 }
 
 function broadcast(clients: Set<ServerResponse>, event: string, data: unknown): void {
@@ -710,7 +825,7 @@ async function createRealtimeCall(input: {
 
 async function sendCue(context: CommandContext, options: VoiceOptions, args: string[]): Promise<void> {
   const first = args[0];
-  const kind = isCueKind(first) ? parseCueKind(first) : "note";
+  const kind = isCueKind(first) ? parseCueKind(first) : "evidence";
   const textArgs = isCueKind(first) ? args.slice(1) : args;
   const text = textArgs.join(" ").trim();
 
@@ -793,7 +908,7 @@ async function attachVoiceThread(context: CommandContext, options: VoiceOptions,
 async function sendHookStopCue(context: CommandContext, options: VoiceOptions): Promise<void> {
   const event = await appendHookEvent(context, options, "Stop");
   const cue: VoiceCue = {
-    kind: "verified",
+    kind: "wrap",
     text: "I finished my response and I am ready for the next instruction.",
     at: new Date().toISOString(),
   };
@@ -874,6 +989,12 @@ function isCueKind(value: string | undefined): boolean {
     value === "changed" ||
     value === "blocked" ||
     value === "verified" ||
+    value === "orientation" ||
+    value === "method" ||
+    value === "evidence" ||
+    value === "decision" ||
+    value === "risk" ||
+    value === "wrap" ||
     value === "pause" ||
     value === "resume"
   );
@@ -1075,6 +1196,71 @@ async function checkAppServer(): Promise<VoiceDoctorCheck> {
       summary: `codex app-server is not responding: ${error instanceof Error ? error.message : String(error)}`,
       fix: "Codex Voice will fall back to hooks when installed, or run without live thread context.",
     };
+  }
+}
+
+async function checkAppServerThreads(codexHome: string): Promise<VoiceDoctorCheck> {
+  const threadId = await findLatestDesktopThreadId(codexHome);
+  if (!threadId) {
+    return {
+      id: "app-server-threads",
+      status: "warn",
+      summary: "No Desktop rollout thread was found to probe app-server thread reads",
+    };
+  }
+
+  const client = new AppServerClient();
+  try {
+    await client.start();
+    await client.initialize();
+    await client.readThread(threadId);
+    return {
+      id: "app-server-threads",
+      status: "ok",
+      summary: "app-server can read the latest Desktop thread",
+    };
+  } catch (error) {
+    if (isDesktopRolloutReadError(error)) {
+      return {
+        id: "app-server-threads",
+        status: "warn",
+        summary: "app-server cannot read Desktop rollouts on this Codex version",
+      };
+    }
+    return {
+      id: "app-server-threads",
+      status: "warn",
+      summary: `app-server thread probe failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  } finally {
+    client.stop();
+  }
+}
+
+async function findLatestDesktopThreadId(codexHome: string): Promise<string | null> {
+  const sessionsDir = path.join(codexHome, "sessions");
+  const files: Array<{ file: string; mtimeMs: number }> = [];
+  await collectRolloutFiles(sessionsDir, files);
+  const latest = files.sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
+  if (!latest) {
+    return null;
+  }
+  const match = path.basename(latest.file).match(/rollout-.+-(019[0-9a-f-]+)\.jsonl$/i);
+  return match?.[1] ?? null;
+}
+
+async function collectRolloutFiles(dir: string, files: Array<{ file: string; mtimeMs: number }>): Promise<void> {
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectRolloutFiles(fullPath, files);
+    } else if (entry.isFile() && entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl")) {
+      const stat = await fs.stat(fullPath).catch(() => null);
+      if (stat) {
+        files.push({ file: fullPath, mtimeMs: stat.mtimeMs });
+      }
+    }
   }
 }
 
@@ -1420,11 +1606,12 @@ function renderVoicePage(options: VoiceOptions): string {
 
     function cueLabel(kind) {
       return {
-        note: "Classroom note",
-        started: "Codex started work",
-        changed: "Codex changed something",
-        blocked: "Codex hit a blocker",
-        verified: "Codex verified the result",
+        orientation: "Classroom task",
+        method: "Method",
+        evidence: "Evidence",
+        decision: "Decision",
+        risk: "Risk",
+        wrap: "Wrap",
       }[kind] || "Classroom note";
     }
 
@@ -1479,7 +1666,7 @@ function renderVoicePage(options: VoiceOptions): string {
       const text = manualCue.value.trim();
       if (!text) return;
       manualCue.value = "";
-      postCue("note", text);
+      postCue("evidence", text);
     });
     pauseButton.addEventListener("click", () => postCue("pause", ""));
     resumeButton.addEventListener("click", () => postCue("resume", ""));
@@ -1503,22 +1690,30 @@ function renderPresentPage(_options: VoiceOptions): string {
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; overflow: hidden; background: #111; color: #f7f1e7; }
-    main { height: 100vh; display: grid; grid-template-rows: auto 1fr auto; gap: 28px; padding: 46px; }
+    main { height: 100vh; display: grid; grid-template-rows: auto auto 1fr auto; gap: 24px; padding: 42px; }
     header { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
     h1 { margin: 0; font-size: clamp(42px, 5vw, 76px); line-height: 0.95; letter-spacing: 0; }
+    .task { color: #d8d0c2; font-size: clamp(22px, 2.2vw, 34px); line-height: 1.22; max-width: 1400px; min-height: 42px; }
     .live { display: inline-flex; align-items: center; gap: 12px; border: 1px solid #3a362f; border-radius: 999px; padding: 12px 18px; color: #d8d0c2; font-size: 24px; }
     .dot { width: 14px; height: 14px; border-radius: 50%; background: #60d394; }
-    .grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 28px; min-height: 0; }
+    .grid { display: grid; grid-template-columns: 0.9fr 1.35fr; gap: 28px; min-height: 0; }
     .panel { min-height: 0; border: 1px solid #37332d; border-radius: 18px; padding: 30px; background: #1c1a17; box-shadow: 0 20px 70px rgba(0,0,0,.25); }
     h2 { margin: 0 0 24px; color: #f4c95d; font-size: clamp(24px, 3vw, 42px); line-height: 1; }
-    .plan { display: grid; gap: 18px; }
+    .phase-list { display: grid; gap: 16px; }
     .step { display: grid; grid-template-columns: 42px 1fr; gap: 18px; align-items: start; font-size: clamp(24px, 2.5vw, 38px); line-height: 1.16; color: #d8d0c2; }
-    .mark { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; border: 2px solid #716a5e; color: #716a5e; font-size: 22px; margin-top: 2px; }
-    .step.active { color: #fffaf0; }
+    .mark { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; border: 2px solid #716a5e; color: #716a5e; font-size: 22px; margin-top: 2px; transition: background .25s ease, border-color .25s ease, color .25s ease; }
+    .step { transition: opacity .25s ease, transform .25s ease, color .25s ease; }
+    .step.pending { opacity: .45; }
+    .step.active { color: #fffaf0; transform: translateX(8px); }
     .step.active .mark { border-color: #65d6ad; background: #65d6ad; color: #111; }
     .step.done .mark { border-color: #f4c95d; background: #f4c95d; color: #111; }
-    .activity { font-size: clamp(25px, 2.8vw, 44px); line-height: 1.16; }
-    .meta { margin-top: 18px; color: #9d9486; font-size: clamp(18px, 1.8vw, 26px); }
+    .moment { display: grid; align-content: center; gap: 26px; border-color: #37332d; transition: border-color .25s ease, background .25s ease; }
+    .moment.risk { border-color: #ff6b6b; background: #241817; }
+    .moment.wrap { border-color: #65d6ad; background: #17211c; }
+    .moment-title { font-size: clamp(42px, 5vw, 86px); line-height: .98; font-weight: 800; letter-spacing: 0; }
+    .moment-detail { color: #d8d0c2; font-size: clamp(26px, 2.9vw, 48px); line-height: 1.16; max-width: 1120px; }
+    .recent { display: grid; gap: 10px; margin-top: 26px; color: #9d9486; font-size: clamp(16px, 1.5vw, 23px); }
+    .recent div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .subtitle { border-radius: 18px; background: #f7f1e7; color: #151515; padding: 24px 30px; font-size: clamp(28px, 3vw, 52px); line-height: 1.1; min-height: 106px; display: flex; align-items: center; }
     .empty { color: #8f8679; }
     @media (max-width: 900px) { body { overflow: auto; } main { height: auto; } .grid { grid-template-columns: 1fr; } }
@@ -1530,38 +1725,66 @@ function renderPresentPage(_options: VoiceOptions): string {
       <h1>Codex is working</h1>
       <div class="live"><span class="dot"></span><span id="status">Live</span></div>
     </header>
+    <div id="task" class="task">Waiting for a Codex classroom task.</div>
     <section class="grid">
       <div class="panel">
-        <h2>Plan</h2>
-        <div id="plan" class="plan"><div class="empty">Waiting for Codex plan updates.</div></div>
+        <h2>Phases</h2>
+        <div id="phases" class="phase-list"><div class="empty">Waiting for Codex phase updates.</div></div>
       </div>
-      <div class="panel">
-        <h2>Now</h2>
-        <div id="activity" class="activity empty">Waiting for activity.</div>
-        <div id="meta" class="meta"></div>
+      <div id="momentCard" class="panel moment">
+        <div id="momentTitle" class="moment-title empty">Waiting for activity.</div>
+        <div id="momentDetail" class="moment-detail"></div>
+        <div id="recent" class="recent"></div>
       </div>
     </section>
     <div id="subtitle" class="subtitle">Codex Classroom presentation panel is ready.</div>
   </main>
   <script>
-    const plan = document.getElementById("plan");
-    const activity = document.getElementById("activity");
-    const meta = document.getElementById("meta");
+    const phases = document.getElementById("phases");
+    const task = document.getElementById("task");
+    const momentCard = document.getElementById("momentCard");
+    const momentTitle = document.getElementById("momentTitle");
+    const momentDetail = document.getElementById("momentDetail");
+    const recent = document.getElementById("recent");
     const subtitle = document.getElementById("subtitle");
     const status = document.getElementById("status");
+    const momentsById = new Map();
+    let frozen = false;
 
-    function renderPlan(steps) {
-      if (!steps || steps.length === 0) {
-        plan.innerHTML = '<div class="empty">Waiting for Codex plan updates.</div>';
+    function renderPhases(items) {
+      if (!items || items.length === 0) {
+        phases.innerHTML = '<div class="empty">Waiting for Codex phase updates.</div>';
         return;
       }
-      plan.innerHTML = steps.slice(0, 6).map((step) => {
-        const done = step.status === "completed";
-        const active = step.status === "in_progress";
+      phases.innerHTML = items.slice(0, 6).map((phase) => {
+        const done = phase.status === "done";
+        const active = phase.status === "active";
         const mark = done ? "OK" : active ? ">" : "";
-        const cls = done ? "step done" : active ? "step active" : "step";
-        return '<div class="' + cls + '"><div class="mark">' + mark + '</div><div>' + escapeHtml(step.step) + '</div></div>';
+        const cls = done ? "step done" : active ? "step active" : "step pending";
+        return '<div class="' + cls + '"><div class="mark">' + mark + '</div><div>' + escapeHtml(phase.label) + '</div></div>';
       }).join("");
+    }
+
+    function renderMoment(moment) {
+      momentsById.set(moment.momentId, moment);
+      if (moment.type === "orientation") {
+        task.textContent = moment.detail;
+      }
+      if (frozen && moment.type !== "wrap") return;
+      momentCard.className = "panel moment " + (moment.type === "risk" ? "risk" : moment.type === "wrap" ? "wrap" : "");
+      momentTitle.className = "moment-title";
+      momentTitle.textContent = moment.title;
+      momentDetail.textContent = moment.detail;
+      if (moment.phases) renderPhases(moment.phases);
+      const evidence = Array.from(momentsById.values())
+        .filter((item) => item.type === "evidence" || item.type === "method" || item.type === "tool")
+        .slice(-3)
+        .reverse();
+      recent.innerHTML = evidence.map((item) => '<div>' + escapeHtml(item.title + ": " + item.detail) + '</div>').join("");
+      if (moment.type === "wrap") {
+        frozen = true;
+        subtitle.textContent = moment.detail;
+      }
     }
 
     function escapeHtml(value) {
@@ -1570,18 +1793,26 @@ function renderPresentPage(_options: VoiceOptions): string {
 
     const events = new EventSource("/events");
     events.addEventListener("ready", () => { status.textContent = "Live"; });
+    events.addEventListener("moment", (event) => renderMoment(JSON.parse(event.data)));
     events.addEventListener("present", (event) => {
       const data = JSON.parse(event.data);
-      if (data.type === "plan") renderPlan(data.steps);
+      if (data.type === "plan") renderPhases(data.steps.map((step) => ({
+        label: step.step,
+        status: step.status === "completed" ? "done" : step.status === "in_progress" ? "active" : "pending",
+      })));
       if (data.type === "command") {
-        activity.className = "activity";
-        activity.textContent = data.command;
-        meta.textContent = data.status === "failed" ? "Command failed" : data.status === "passed" ? "Command passed" : "Running command";
+        if (!frozen) {
+          momentTitle.className = "moment-title";
+          momentTitle.textContent = data.status === "failed" ? "Command failed" : data.status === "passed" ? "Command passed" : "Running command";
+          momentDetail.textContent = data.command;
+        }
       }
       if (data.type === "diff") {
-        activity.className = "activity";
-        activity.textContent = data.filesChanged + " file" + (data.filesChanged === 1 ? "" : "s") + " changed";
-        meta.textContent = "+" + (data.additions || 0) + " / -" + (data.deletions || 0);
+        if (!frozen) {
+          momentTitle.className = "moment-title";
+          momentTitle.textContent = data.filesChanged + " file" + (data.filesChanged === 1 ? "" : "s") + " changed";
+          momentDetail.textContent = "+" + (data.additions || 0) + " / -" + (data.deletions || 0);
+        }
       }
       if (data.type === "subtitle") subtitle.textContent = data.text;
     });
@@ -1620,10 +1851,13 @@ Voice options:
   --api-key-env <name>      Environment variable containing the OpenAI API key
   --safety-identifier <id>  Optional stable privacy-preserving safety identifier
   --context-source <source> app-server, hooks, or both (default: app-server)
+  --replay <file>           Replay a rollout JSONL into the panel at demo speed
+  --auto-narrate            Inject sparse classroom narration when Codex is silent
+  --no-auto-narrate         Disable automatic classroom narration
   --no-open                 Do not open the browser after starting
   --qr                      Print the presentation URL
 
 Cue kinds:
-  note, started, changed, blocked, verified, pause, resume
+  orientation, method, evidence, decision, risk, wrap, pause, resume
 `);
 }

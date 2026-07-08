@@ -14,6 +14,8 @@ export interface GlobalOptions {
   voiceSafetyIdentifier?: string;
   voiceOpen?: boolean;
   voiceContextSource?: "app-server" | "hooks" | "both";
+  voiceReplayFile?: string;
+  voiceAutoNarrate?: boolean;
   qr: boolean;
   copyAuth?: boolean;
   copyConfig?: boolean;
