@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 export type MomentType = "orientation" | "method" | "tool" | "evidence" | "decision" | "risk" | "wrap";
 export type TaskType = "research" | "coding" | "writing" | "generic";
 export type Phase = { id: string; label: string; status: "pending" | "active" | "done" };
@@ -38,8 +40,8 @@ export type RawMappedEvent =
 
 export const TASK_KEYWORDS: Record<TaskType, string[]> = {
   research: ["busca", "buscar", "search", "noticias", "news", "investiga", "research"],
-  coding: ["arregla", "fix", "test", "bug", "implementa", "implement", "codigo", "code"],
-  writing: ["escribe", "redacta", "write", "draft", "articulo", "article"],
+  coding: ["arregla", "fix", "test", "bug", "implementa", "implement", "código", "codigo", "code"],
+  writing: ["escribe", "redacta", "write", "draft", "artículo", "articulo", "article"],
   generic: [],
 };
 
@@ -53,7 +55,7 @@ const PHASES: Record<TaskType, Array<{ id: string; label: string }>> = {
   ],
   coding: [
     { id: "inspecting", label: "Revisando contexto" },
-    { id: "editing", label: "Editando solucion" },
+    { id: "editing", label: "Editando solución" },
     { id: "verifying", label: "Verificando cambios" },
     { id: "done", label: "Trabajo listo" },
   ],
@@ -187,12 +189,25 @@ export function isDuplicateText(a: string, b: string): boolean {
 }
 
 export function sanitizePromptForClassroom(text: string): string {
+  const repaired = repairTextEncoding(text);
   return truncateSentence(
-    stripLocalPaths(stripMarkdownLinks(stripSkillInstructions(text)))
+    stripLocalPaths(stripMarkdownLinks(stripSkillInstructions(repaired)))
       .replace(/\s+/g, " ")
       .trim(),
     140,
   );
+}
+
+export function repairTextEncoding(text: string): string {
+  if (!/[ÃÂâ]/.test(text)) {
+    return text;
+  }
+  try {
+    const repaired = Buffer.from(text, "latin1").toString("utf8");
+    return repaired.includes("\uFFFD") ? text : repaired;
+  } catch {
+    return text;
+  }
 }
 
 export function parseVoiceSayCommand(command: string): { type: MomentType; kind: string; text: string } | null {
@@ -203,7 +218,7 @@ export function parseVoiceSayCommand(command: string): { type: MomentType; kind:
   }
   const maybeKind = match[1] ?? "evidence";
   const rawText = match[2]?.trim() ?? "";
-  const text = unquote(rawText);
+  const text = repairTextEncoding(unquote(rawText));
   if (!text) {
     return null;
   }
@@ -211,6 +226,7 @@ export function parseVoiceSayCommand(command: string): { type: MomentType; kind:
 }
 
 function ingestEvent(state: MapperState, event: RawMappedEvent): ClassroomMoment[] {
+  event = repairRawMappedEvent(event);
   const moments: ClassroomMoment[] = [];
 
   if (event.kind === "user-prompt" && state.phases.every((phase) => phase.status === "pending")) {
@@ -227,7 +243,7 @@ function ingestEvent(state: MapperState, event: RawMappedEvent): ClassroomMoment
       type: "method",
       momentId: "plan-real",
       title: "Plan de trabajo",
-      detail: "Codex preparo un plan explicito para la tarea.",
+      detail: "Codex preparó un plan explícito para la tarea.",
       speakable: false,
       phase: activePhase(state.phases).id,
       at: event.at,
@@ -253,7 +269,7 @@ function ingestEvent(state: MapperState, event: RawMappedEvent): ClassroomMoment
       type: "tool",
       momentId: burst.id,
       title,
-      detail: truncateSentence(stripLocalPaths(event.query ?? "Buscando informacion reciente"), 160),
+      detail: truncateSentence(stripLocalPaths(event.query ?? "Buscando información reciente"), 160),
       internal: event.query,
       speakable: false,
       phase: activePhase(state.phases).id,
@@ -268,7 +284,7 @@ function ingestEvent(state: MapperState, event: RawMappedEvent): ClassroomMoment
         type: "method",
         momentId: "method-compare-sources",
         title: "Comparando fuentes",
-        detail: "Estoy comparando varias fuentes porque la informacion reciente puede cambiar; una sola fuente no basta.",
+        detail: "Estoy comparando varias fuentes porque la información reciente puede cambiar; una sola fuente no basta.",
         speakable: true,
         phase: activePhase(state.phases).id,
         status: "done",
@@ -305,10 +321,10 @@ function ingestEvent(state: MapperState, event: RawMappedEvent): ClassroomMoment
     pushMoment(state, moments, {
       type: event.exitCode && event.exitCode !== 0 ? "risk" : "tool",
       momentId: `tool-${hashText(event.command)}`,
-      title: event.exitCode && event.exitCode !== 0 ? "Comando fallo" : "Comando listo",
+      title: event.exitCode && event.exitCode !== 0 ? "Comando falló" : "Comando listo",
       detail: event.exitCode && event.exitCode !== 0
-        ? `El comando termino con codigo ${event.exitCode}.`
-        : "La herramienta termino sin errores visibles.",
+        ? `El comando terminó con código ${event.exitCode}.`
+        : "La herramienta terminó sin errores visibles.",
       internal: event.command,
       speakable: Boolean(event.exitCode && event.exitCode !== 0),
       phase: activePhase(state.phases).id,
@@ -321,7 +337,7 @@ function ingestEvent(state: MapperState, event: RawMappedEvent): ClassroomMoment
       type: "evidence",
       momentId: "files-changed",
       title: "Archivos cambiados",
-      detail: event.filesChanged === 1 ? "Codex cambio un archivo relevante." : `Codex cambio ${event.filesChanged} archivos relevantes.`,
+      detail: event.filesChanged === 1 ? "Codex cambió un archivo relevante." : `Codex cambió ${event.filesChanged} archivos relevantes.`,
       speakable: false,
       phase: activePhase(state.phases).id,
       status: "done",
@@ -331,8 +347,8 @@ function ingestEvent(state: MapperState, event: RawMappedEvent): ClassroomMoment
     pushMoment(state, moments, {
       type: event.status === "failed" ? "risk" : "tool",
       momentId: `dynamic-${hashText(event.toolName)}`,
-      title: event.status === "failed" ? "Herramienta fallo" : "Herramienta externa",
-      detail: event.status === "failed" ? `${event.toolName} fallo.` : `Codex esta usando ${event.toolName}.`,
+      title: event.status === "failed" ? "Herramienta falló" : "Herramienta externa",
+      detail: event.status === "failed" ? `${event.toolName} falló.` : `Codex está usando ${event.toolName}.`,
       speakable: event.status === "failed",
       phase: activePhase(state.phases).id,
       status: event.status,
@@ -342,8 +358,8 @@ function ingestEvent(state: MapperState, event: RawMappedEvent): ClassroomMoment
     pushMoment(state, moments, {
       type: event.status === "running" ? "method" : "wrap",
       momentId: "review",
-      title: event.status === "running" ? "Revisando cambios" : "Revision lista",
-      detail: event.status === "running" ? "Codex esta revisando el trabajo antes de cerrar." : truncateSentence(stripMarkdown(event.text), 180),
+      title: event.status === "running" ? "Revisando cambios" : "Revisión lista",
+      detail: event.status === "running" ? "Codex está revisando el trabajo antes de cerrar." : truncateSentence(stripMarkdown(event.text), 180),
       internal: event.text,
       speakable: event.status === "done",
       phase: activePhase(state.phases).id,
@@ -395,7 +411,7 @@ function ingestEvent(state: MapperState, event: RawMappedEvent): ClassroomMoment
       pushMoment(state, moments, {
         type: "evidence",
         momentId: `message-${hashText(detail)}`,
-        title: "Senal para mirar",
+        title: "Señal para mirar",
         detail,
         internal: event.text,
         speakable: false,
@@ -406,9 +422,9 @@ function ingestEvent(state: MapperState, event: RawMappedEvent): ClassroomMoment
   } else if (event.kind === "task-complete") {
     state.completed = true;
     markAllDone(state.phases);
-    const candidateDetail = truncateSentence(stripLocalPaths(stripMarkdown(firstSentence(state.finalCandidate ?? "La respuesta esta lista para revisar."))), 200);
+    const candidateDetail = truncateSentence(stripLocalPaths(stripMarkdown(firstSentence(state.finalCandidate ?? "La respuesta está lista para revisar."))), 200);
     const detail = state.lastSubtitleDetails.some((previous) => isDuplicateText(previous, candidateDetail))
-      ? "La respuesta esta lista para revisar con la clase."
+      ? "La respuesta está lista para revisar con la clase."
       : candidateDetail;
     pushMoment(state, moments, {
       type: "wrap",
@@ -456,6 +472,29 @@ function advancePhase(state: MapperState, event: RawMappedEvent): void {
   } else if (event.kind === "task-complete") {
     state.completed = true;
     markAllDone(state.phases);
+  }
+}
+
+function repairRawMappedEvent(event: RawMappedEvent): RawMappedEvent {
+  switch (event.kind) {
+    case "user-prompt":
+    case "review":
+    case "realtime-transcript":
+    case "agent-message":
+    case "assistant-message":
+      return { ...event, text: repairTextEncoding(event.text) };
+    case "web-search-call":
+    case "web-search-end":
+      return { ...event, query: event.query ? repairTextEncoding(event.query) : event.query };
+    case "command-started":
+    case "command-completed":
+      return { ...event, command: repairTextEncoding(event.command) };
+    case "dynamic-tool":
+      return { ...event, toolName: repairTextEncoding(event.toolName) };
+    case "plan":
+      return { ...event, phases: event.phases.map((phase) => ({ ...phase, label: repairTextEncoding(phase.label) })) };
+    default:
+      return event;
   }
 }
 
@@ -548,7 +587,7 @@ function isSuppressedCommand(command: string): boolean {
 }
 
 function isLowValueAgentMessage(text: string): boolean {
-  return /codex-voice|codex-classroom voice say|sidecar de voz|teaching beats|leer sus instrucciones|pediste explicitamente|skill indica/i.test(text);
+  return /codex-voice|codex-classroom voice say|sidecar de voz|teaching beats|leer sus instrucciones|pediste explicitamente|pediste explícitamente|skill indica/i.test(text);
 }
 
 function cueKindToMomentType(kind: string): MomentType {
@@ -563,10 +602,10 @@ function cueKindToMomentType(kind: string): MomentType {
 function titleForMomentType(type: MomentType): string {
   const titles: Record<MomentType, string> = {
     orientation: "Tarea de la clase",
-    method: "Metodo de trabajo",
+    method: "Método de trabajo",
     tool: "Herramienta en uso",
     evidence: "Evidencia encontrada",
-    decision: "Decision tomada",
+    decision: "Decisión tomada",
     risk: "Riesgo o bloqueo",
     wrap: "Respuesta lista",
   };
@@ -618,7 +657,7 @@ function truncateSentence(text: string, maxLength: number): string {
 }
 
 function normalizeText(text: string): string {
-  return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return repairTextEncoding(text).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 function normalizeForSimilarity(text: string): string {

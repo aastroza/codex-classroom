@@ -43,8 +43,8 @@ const COMMAND_OPTIONS: Record<string, Set<string>> = {
   doctor: new Set([]),
   profiles: new Set([]),
   reset: new Set(["yes", "y", "dry-run"]),
-  voice: new Set(["host", "port", "model", "voice", "language", "api-key-env", "safety-identifier", "context-source", "replay", "auto-narrate", "no-auto-narrate", "open", "no-open", "qr"]),
-  present: new Set(["host", "port", "model", "voice", "language", "api-key-env", "safety-identifier", "context-source", "replay", "auto-narrate", "no-auto-narrate", "open", "no-open", "qr"]),
+  voice: new Set(["host", "port", "model", "voice", "language", "api-key-env", "safety-identifier", "replay", "auto-narrate", "no-auto-narrate", "open", "no-open", "qr"]),
+  present: new Set(["host", "port", "model", "voice", "language", "api-key-env", "safety-identifier", "replay", "auto-narrate", "no-auto-narrate", "open", "no-open", "qr"]),
   help: new Set([]),
   version: new Set([]),
 };
@@ -130,7 +130,6 @@ function parseGlobalOptions(args: string[]): ParsedGlobalOptions {
       language: { type: "string" },
       "api-key-env": { type: "string" },
       "safety-identifier": { type: "string" },
-      "context-source": { type: "string" },
       replay: { type: "string" },
       "auto-narrate": { type: "boolean", default: true },
       "no-auto-narrate": { type: "boolean" },
@@ -168,7 +167,6 @@ function parseGlobalOptions(args: string[]): ParsedGlobalOptions {
     voiceApiKeyEnv: parsed.values["api-key-env"],
     voiceSafetyIdentifier: parsed.values["safety-identifier"],
     voiceOpen: parsed.values["no-open"] ? false : parsed.values.open,
-    voiceContextSource: parseVoiceContextSource(parsed.values["context-source"]),
     voiceReplayFile: parsed.values.replay,
     voiceAutoNarrate: parsed.values["no-auto-narrate"] ? false : parsed.values["auto-narrate"],
     copyAuth: parsed.values["no-copy-auth"] ? false : parsed.values["copy-auth"],
@@ -234,7 +232,6 @@ Options:
   --language <language>       Codex Voice spoken language
   --api-key-env <name>        Env var containing the OpenAI API key
   --safety-identifier <id>    Optional privacy-preserving Realtime safety id
-  --context-source <source>   app-server, hooks, or both for voice context
   --replay <file>             Feed a rollout JSONL into Present/Voice for demos
   --auto-narrate              Let the classroom layer speak phase transitions
   --no-auto-narrate           Disable automatic classroom narration
@@ -275,18 +272,6 @@ function validateOptionsForCommand(commandName: string, args: string[]): void {
       throw new CliError(`Unknown option for ${commandName}: ${arg.startsWith("--") ? `--${option}` : `-${option}`}`);
     }
   }
-}
-
-function parseVoiceContextSource(value: string | undefined): ParsedGlobalOptions["voiceContextSource"] {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (value === "app-server" || value === "hooks" || value === "both") {
-    return value;
-  }
-
-  throw new CliError("--context-source must be app-server, hooks, or both.");
 }
 
 function parseWindowsSandboxMode(value: string | undefined): ParsedGlobalOptions["windowsSandboxMode"] {

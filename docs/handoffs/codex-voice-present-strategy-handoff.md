@@ -39,7 +39,7 @@ Observed issue:
 - `/present`: projector-friendly classroom panel
 - `/events`: Server-Sent Events stream consumed by both pages
 - `/cue`: local POST endpoint for `codex-classroom voice say`
-- `/context-event`: local POST endpoint for hooks/context
+- `/context-event`: local POST endpoint for local context injection
 - `/attach`: local POST endpoint to attach a specific thread id
 - `/context`: recent compact context from `~/.codex-classroom/voice/events.jsonl`
 

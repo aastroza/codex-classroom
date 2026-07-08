@@ -38,8 +38,8 @@ export function maybeAutoNarrateMoment(
 
 export const CLASSROOM_TEMPLATES = {
   es: {
-    method: "Estoy comparando varias fuentes porque la informacion reciente puede cambiar; una sola fuente no basta.",
-    wrap: "La respuesta esta lista para revisar con la clase.",
+    method: "Estoy comparando varias fuentes porque la información reciente puede cambiar; una sola fuente no basta.",
+    wrap: "La respuesta está lista para revisar con la clase.",
   },
   en: {
     method: "I am comparing several sources because recent information can change; one source is not enough.",

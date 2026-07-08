@@ -13,7 +13,6 @@ export interface GlobalOptions {
   voiceApiKeyEnv?: string;
   voiceSafetyIdentifier?: string;
   voiceOpen?: boolean;
-  voiceContextSource?: "app-server" | "hooks" | "both";
   voiceReplayFile?: string;
   voiceAutoNarrate?: boolean;
   qr: boolean;

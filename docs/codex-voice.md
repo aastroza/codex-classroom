@@ -24,13 +24,6 @@ The normal teaching flow is:
 
 The sidecar watches Codex Desktop `rollout-*.jsonl` session files, so it can follow threads created in the app after the sidecar starts. It also uses `codex app-server` events when that connection can attach to a thread. If app-server cannot read Desktop-created rollouts on the installed Codex version, the sidecar disables that source for the session and keeps using Desktop session files.
 
-Hooks are still available as an extra fallback for older setups:
-
-```sh
-codex-classroom voice start --context-source hooks
-codex-classroom voice start --context-source both
-```
-
 Codex can then send cues such as:
 
 - "I am checking several sources because current news can change during class."
@@ -73,7 +66,7 @@ codex-classroom voice start
 By default it binds to `127.0.0.1:17321`, opens the browser, and uses:
 
 - model: `gpt-realtime-2.1-mini`
-- voice: `marin`
+- voice: `verse`
 - language: `Spanish`
 
 Useful options:
@@ -81,7 +74,7 @@ Useful options:
 ```sh
 codex-classroom voice start --port 17322
 codex-classroom voice start --language English
-codex-classroom voice start --voice marin
+codex-classroom voice start --voice verse
 codex-classroom voice start --model gpt-realtime-2.1-mini
 codex-classroom voice start --no-open
 codex-classroom voice start --replay src/core/fixtures/rollout-world-cup-news.jsonl
@@ -185,30 +178,6 @@ Run doctor to verify app-server support:
 ```sh
 codex-classroom voice doctor
 ```
-
-Classroom hooks are still useful as an end-of-turn cue source:
-
-```sh
-codex-classroom voice install-hook
-```
-
-Then open `/hooks` in Codex and trust the new hook. Codex requires review before non-managed command hooks run.
-
-The hook set records:
-
-- `UserPromptSubmit`: the next classroom task
-- `PostToolUse`: important tool outcomes
-- `Stop`: the end of a Codex turn
-
-The `Stop` hook also sends a short final spoken cue when the sidecar is running.
-
-Remove hooks after class:
-
-```sh
-codex-classroom voice uninstall-hook
-```
-
-The hooks exit successfully even when the sidecar is not running, so they should not block Codex.
 
 ## Context storage
 

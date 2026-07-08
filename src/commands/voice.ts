@@ -16,9 +16,6 @@ import { mapRolloutText, RolloutWatcher, type RolloutMappedEvent } from "../core
 import {
   appendVoiceContextEvent,
   buildThreadBrief,
-  normalizeHookContext,
-  parseHookPayload,
-  readStdinText,
   readVoiceContextEvents,
   type VoiceContextEvent,
 } from "../core/voice-context.js";
@@ -51,7 +48,6 @@ interface VoiceOptions {
   apiKeyEnv: string;
   safetyIdentifier?: string;
   open: boolean;
-  contextSource: "app-server" | "hooks" | "both";
   replayFile?: string;
   autoNarrate: boolean;
 }
@@ -76,11 +72,6 @@ interface VoiceServerState {
 }
 
 const CODEX_VOICE_SKILL_NAME = "codex-voice";
-const CODEX_VOICE_HOOK_STATUS = "Speaking Codex Voice turn status";
-const CODEX_VOICE_HOOK_COMMAND = "codex-classroom voice hook-stop";
-const CODEX_VOICE_CONTEXT_HOOK_STATUS = "Recording Codex Voice context";
-const CODEX_VOICE_USER_PROMPT_HOOK_COMMAND = "codex-classroom voice hook-event UserPromptSubmit";
-const CODEX_VOICE_POST_TOOL_HOOK_COMMAND = "codex-classroom voice hook-event PostToolUse";
 
 export async function voiceCommand(context: CommandContext, args: string[]): Promise<void> {
   const action = args[0] ?? "help";
@@ -111,16 +102,6 @@ export async function voiceCommand(context: CommandContext, args: string[]): Pro
     return;
   }
 
-  if (action === "hook-stop") {
-    await sendHookStopCue(context, options);
-    return;
-  }
-
-  if (action === "hook-event") {
-    await recordHookEvent(context, options, args[1]);
-    return;
-  }
-
   if (action === "context") {
     await printVoiceContext(context, args.slice(1));
     return;
@@ -133,16 +114,6 @@ export async function voiceCommand(context: CommandContext, args: string[]): Pro
 
   if (action === "doctor") {
     await voiceDoctor(context, options);
-    return;
-  }
-
-  if (action === "install-hook") {
-    await installVoiceHook(context);
-    return;
-  }
-
-  if (action === "uninstall-hook") {
-    await uninstallVoiceHook(context);
     return;
   }
 
@@ -164,7 +135,6 @@ function getVoiceOptions(context: CommandContext): VoiceOptions {
     apiKeyEnv: context.options.voiceApiKeyEnv ?? DEFAULT_VOICE_API_KEY_ENV,
     safetyIdentifier: context.options.voiceSafetyIdentifier,
     open: context.options.voiceOpen ?? true,
-    contextSource: context.options.voiceContextSource ?? "app-server",
     replayFile: context.options.voiceReplayFile,
     autoNarrate: context.options.voiceAutoNarrate ?? true,
   };
@@ -199,7 +169,6 @@ async function voiceDoctor(context: CommandContext, options: VoiceOptions): Prom
     await checkAppServerThreads(context.paths.realCodexHome),
     await checkSkillInstalled(context.paths.realCodexHome),
     await checkVoiceSidecar(options),
-    await checkVoiceHook(context.paths.realCodexHome),
   ];
   const ok = checks.every((check) => check.status !== "fail");
 
@@ -214,64 +183,6 @@ async function voiceDoctor(context: CommandContext, options: VoiceOptions): Prom
       context.output.info(`  fix: ${check.fix}`);
     }
   }
-}
-
-async function installVoiceHook(context: CommandContext): Promise<void> {
-  const hooksPath = path.join(context.paths.realCodexHome, "hooks.json");
-  const config = await readHooksConfig(hooksPath);
-  const installed = [
-    ensureCommandHook(config, "Stop", CODEX_VOICE_HOOK_COMMAND, CODEX_VOICE_HOOK_STATUS),
-    ensureCommandHook(config, "UserPromptSubmit", CODEX_VOICE_USER_PROMPT_HOOK_COMMAND, CODEX_VOICE_CONTEXT_HOOK_STATUS),
-    ensureCommandHook(config, "PostToolUse", CODEX_VOICE_POST_TOOL_HOOK_COMMAND, CODEX_VOICE_CONTEXT_HOOK_STATUS, "*"),
-  ];
-
-  await writeHooksConfig(hooksPath, config);
-
-  if (context.options.json) {
-    context.output.json({ ok: true, hooksPath, installed: installed.filter(Boolean).length });
-    return;
-  }
-
-  context.output.info(installed.some(Boolean) ? "Installed Codex Voice context hooks" : "Codex Voice context hooks already installed");
-  context.output.info(`hooks.json: ${hooksPath}`);
-  context.output.info("Open /hooks in Codex and trust the new hook before expecting it to run.");
-}
-
-async function uninstallVoiceHook(context: CommandContext): Promise<void> {
-  const hooksPath = path.join(context.paths.realCodexHome, "hooks.json");
-  if (!(await pathExists(hooksPath))) {
-    context.output.info(`No hooks.json found at ${hooksPath}`);
-    return;
-  }
-
-  const config = await readHooksConfig(hooksPath);
-  const commands = new Set([
-    CODEX_VOICE_HOOK_COMMAND,
-    CODEX_VOICE_USER_PROMPT_HOOK_COMMAND,
-    CODEX_VOICE_POST_TOOL_HOOK_COMMAND,
-  ]);
-  let removed = 0;
-  for (const eventName of Object.keys(config.hooks)) {
-    const groups = config.hooks[eventName] ?? [];
-    for (const group of groups) {
-      const before = group.hooks.length;
-      group.hooks = group.hooks.filter((hook) => !(hook.type === "command" && commands.has(hook.command)));
-      removed += before - group.hooks.length;
-    }
-    config.hooks[eventName] = groups.filter((group) => group.hooks.length > 0);
-    if (config.hooks[eventName].length === 0) {
-      delete config.hooks[eventName];
-    }
-  }
-
-  await writeHooksConfig(hooksPath, config);
-
-  if (context.options.json) {
-    context.output.json({ ok: true, hooksPath, removed });
-    return;
-  }
-
-  context.output.info(removed > 0 ? "Removed Codex Voice Stop hook" : "Codex Voice Stop hook was not installed");
 }
 
 async function startVoice(
@@ -329,7 +240,7 @@ async function startVoice(
     token,
     startedAt: new Date().toISOString(),
   });
-  const appServer = shouldUseAppServer(options) ? await startAppServerBridge(context, serverState, startOptions.threadId) : null;
+  const appServer = await startAppServerBridge(context, serverState, startOptions.threadId);
   const rolloutWatcher = await startRolloutBridge(context, serverState, startOptions.threadId);
   serverState.appServer = appServer;
   serverState.rolloutWatcher = rolloutWatcher;
@@ -498,25 +409,18 @@ async function routeRequest(
   sendJson(response, 404, { ok: false, error: "Not found" });
 }
 
-function shouldUseAppServer(options: VoiceOptions): boolean {
-  return options.contextSource === "app-server" || options.contextSource === "both";
-}
-
 async function startAppServerBridge(
   context: CommandContext,
   state: VoiceServerState,
   initialThreadId?: string,
 ): Promise<AppServerClient | null> {
-  const options = state.options;
   const client = new AppServerClient();
   try {
     await client.start();
     await client.initialize();
   } catch {
     client.stop();
-    if (options.contextSource === "app-server") {
-      context.output.warn("codex app-server is not available; app-server context is disabled.");
-    }
+    context.output.warn("codex app-server is not available; app-server context is disabled.");
     return null;
   }
 
@@ -905,55 +809,6 @@ async function attachVoiceThread(context: CommandContext, options: VoiceOptions,
   }
 }
 
-async function sendHookStopCue(context: CommandContext, options: VoiceOptions): Promise<void> {
-  const event = await appendHookEvent(context, options, "Stop");
-  const cue: VoiceCue = {
-    kind: "wrap",
-    text: "I finished my response and I am ready for the next instruction.",
-    at: new Date().toISOString(),
-  };
-
-  await notifyContextEvent(context, options, event);
-  const session = await readVoiceSession(context.paths.classroomRoot);
-  await fetch(`http://${options.host}:${options.port}/cue`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(session ? { "X-Voice-Token": session.token } : {}),
-    },
-    body: JSON.stringify(cue),
-  }).catch(() => {
-    // Hooks must not block Codex if the sidecar is not running.
-  });
-}
-
-async function recordHookEvent(context: CommandContext, options: VoiceOptions, eventName: string | undefined): Promise<void> {
-  if (!eventName) {
-    throw new CliError("voice hook-event requires a Codex hook event name.");
-  }
-  const event = await appendHookEvent(context, options, eventName);
-  await notifyContextEvent(context, options, event);
-
-  if (context.options.json) {
-    context.output.json({ ok: true, event });
-  }
-}
-
-async function appendHookEvent(
-  context: CommandContext,
-  _options: VoiceOptions,
-  eventName: string,
-): Promise<VoiceContextEvent> {
-  const stdin = await readStdinText();
-  const payload = parseHookPayload(stdin);
-  const normalized = normalizeHookContext({
-    eventName,
-    payload,
-    cwd: process.cwd(),
-  });
-  return await appendVoiceContextEvent(context.paths.classroomRoot, normalized);
-}
-
 async function printVoiceContext(context: CommandContext, args: string[]): Promise<void> {
   const limit = parseContextLimit(args[0]);
   const events = await readVoiceContextEvents(context.paths.classroomRoot, limit);
@@ -966,20 +821,6 @@ async function printVoiceContext(context: CommandContext, args: string[]): Promi
 
   context.output.info(`Codex Voice context: ${events.length} event(s)`);
   context.output.info(brief);
-}
-
-async function notifyContextEvent(context: CommandContext, options: VoiceOptions, event: VoiceContextEvent): Promise<void> {
-  const session = await readVoiceSession(context.paths.classroomRoot);
-  await fetch(`http://${options.host}:${options.port}/context-event`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(session ? { "X-Voice-Token": session.token } : {}),
-    },
-    body: JSON.stringify(event),
-  }).catch(() => {
-    // Context hooks should keep working even when the sidecar is not open.
-  });
 }
 
 function isCueKind(value: string | undefined): boolean {
@@ -1058,22 +899,6 @@ interface VoiceDoctorCheck {
   fix?: string;
 }
 
-interface HooksConfig {
-  hooks: Record<string, HookGroup[]>;
-}
-
-interface HookGroup {
-  matcher?: string;
-  hooks: HookHandler[];
-}
-
-interface HookHandler {
-  type: string;
-  command: string;
-  timeout?: number;
-  statusMessage?: string;
-}
-
 async function checkCliOnPath(): Promise<VoiceDoctorCheck> {
   const result = await runCommand("codex-classroom", ["--version"]);
   if (result.ok) {
@@ -1140,47 +965,6 @@ async function checkVoiceSidecar(options: VoiceOptions): Promise<VoiceDoctorChec
   }
 }
 
-async function checkVoiceHook(codexHome: string): Promise<VoiceDoctorCheck> {
-  const hooksPath = path.join(codexHome, "hooks.json");
-  if (!(await pathExists(hooksPath))) {
-    return {
-      id: "context-hooks",
-      status: "warn",
-      summary: "Codex Voice context hooks are not installed",
-      fix: "Run codex-classroom voice install-hook, then review it with /hooks in Codex.",
-    };
-  }
-
-  const config = await readHooksConfig(hooksPath);
-  const expected = [
-    CODEX_VOICE_HOOK_COMMAND,
-    CODEX_VOICE_USER_PROMPT_HOOK_COMMAND,
-    CODEX_VOICE_POST_TOOL_HOOK_COMMAND,
-  ];
-  const installed = new Set<string>();
-  for (const groups of Object.values(config.hooks)) {
-    for (const group of groups) {
-      for (const hook of group.hooks) {
-        if (hook.type === "command") {
-          installed.add(hook.command);
-        }
-      }
-    }
-  }
-
-  const missing = expected.filter((command) => !installed.has(command));
-  if (missing.length === 0) {
-    return { id: "context-hooks", status: "ok", summary: `Codex Voice context hooks are configured in ${hooksPath}` };
-  }
-
-  return {
-    id: "context-hooks",
-    status: "warn",
-    summary: `Codex Voice context hooks are incomplete (${missing.length} missing)`,
-    fix: "Run codex-classroom voice install-hook, then review it with /hooks in Codex.",
-  };
-}
-
 async function checkAppServer(): Promise<VoiceDoctorCheck> {
   try {
     const result = await checkAppServerAvailable();
@@ -1194,7 +978,7 @@ async function checkAppServer(): Promise<VoiceDoctorCheck> {
       id: "app-server",
       status: "warn",
       summary: `codex app-server is not responding: ${error instanceof Error ? error.message : String(error)}`,
-      fix: "Codex Voice will fall back to hooks when installed, or run without live thread context.",
+      fix: "Codex Voice will still use Desktop session rollouts when available, or run without live thread context.",
     };
   }
 }
@@ -1286,55 +1070,6 @@ async function runCommand(command: string, args: string[]): Promise<{ ok: boolea
       resolve({ ok: code === 0, stdout: stdout.trim(), stderr: stderr.trim() });
     });
   });
-}
-
-async function readHooksConfig(hooksPath: string): Promise<HooksConfig> {
-  if (!(await pathExists(hooksPath))) {
-    return { hooks: {} };
-  }
-
-  const parsed = JSON.parse(await fs.readFile(hooksPath, "utf8")) as Partial<HooksConfig>;
-  return { hooks: parsed.hooks ?? {} };
-}
-
-async function writeHooksConfig(hooksPath: string, config: HooksConfig): Promise<void> {
-  await fs.mkdir(path.dirname(hooksPath), { recursive: true });
-  await fs.writeFile(hooksPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-}
-
-function ensureHookGroups(config: HooksConfig, event: string): HookGroup[] {
-  config.hooks[event] ??= [];
-  return config.hooks[event];
-}
-
-function ensureCommandHook(
-  config: HooksConfig,
-  event: string,
-  command: string,
-  statusMessage: string,
-  matcher?: string,
-): boolean {
-  const groups = ensureHookGroups(config, event);
-  const group = groups.find((candidate) => (candidate.matcher ?? "") === (matcher ?? "")) ?? {
-    ...(matcher ? { matcher } : {}),
-    hooks: [],
-  };
-  if (!groups.includes(group)) {
-    groups.push(group);
-  }
-
-  const alreadyInstalled = group.hooks.some((hook) => hook.type === "command" && hook.command === command);
-  if (alreadyInstalled) {
-    return false;
-  }
-
-  group.hooks.push({
-    type: "command",
-    command,
-    timeout: 10,
-    statusMessage,
-  });
-  return true;
 }
 
 function parseContextLimit(value: string | undefined): number {
@@ -1445,7 +1180,7 @@ function renderVoicePage(options: VoiceOptions): string {
 
     <section class="panel" style="margin-top:16px">
       <h2>Thread context</h2>
-      <p id="contextStatus">Waiting for Codex hook events.</p>
+      <p id="contextStatus">Waiting for Codex thread context.</p>
       <div id="contextLog" class="log"></div>
     </section>
   </main>
@@ -1838,19 +1573,16 @@ Usage:
   codex-classroom voice context [limit] [options]
   codex-classroom voice doctor [options]
   codex-classroom voice install-skill [options]
-  codex-classroom voice install-hook [options]
-  codex-classroom voice uninstall-hook [options]
   codex-classroom present [threadId] [options]
 
 Voice options:
   --host <host>             Local host to bind or contact (default: 127.0.0.1)
   --port <port>             Local port to bind or contact (default: 17321)
   --model <model>           Realtime model (default: gpt-realtime-2.1-mini)
-  --voice <voice>           Realtime voice (default: marin)
+  --voice <voice>           Realtime voice (default: verse)
   --language <language>     Spoken language (default: Spanish)
   --api-key-env <name>      Environment variable containing the OpenAI API key
   --safety-identifier <id>  Optional stable privacy-preserving safety identifier
-  --context-source <source> app-server, hooks, or both (default: app-server)
   --replay <file>           Replay a rollout JSONL into the panel at demo speed
   --auto-narrate            Inject sparse classroom narration when Codex is silent
   --no-auto-narrate         Disable automatic classroom narration

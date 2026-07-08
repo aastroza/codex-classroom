@@ -1,7 +1,7 @@
 ﻿export const DEFAULT_VOICE_HOST = "127.0.0.1";
 export const DEFAULT_VOICE_PORT = 17321;
 export const DEFAULT_VOICE_MODEL = "gpt-realtime-2.1-mini";
-export const DEFAULT_VOICE_NAME = "marin";
+export const DEFAULT_VOICE_NAME = "verse";
 export const DEFAULT_VOICE_LANGUAGE = "Spanish";
 export const DEFAULT_VOICE_API_KEY_ENV = "OPENAI_API_KEY";
 
@@ -19,7 +19,7 @@ export interface VoiceCue {
   kind: VoiceCueKind;
   text: string;
   at: string;
-  source?: "manual" | "hook" | "auto" | "cue";
+  source?: "manual" | "auto" | "cue";
 }
 
 export interface VoiceSessionOptions {

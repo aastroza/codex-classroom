@@ -26,7 +26,7 @@ test("parseCueKind validates supported voice cue kinds", () => {
 test("buildRealtimeSessionConfig keeps the realtime model configuration compact", () => {
   const config = buildRealtimeSessionConfig({
     model: "gpt-realtime-2.1-mini",
-    voice: "marin",
+    voice: "verse",
     language: "Spanish",
   });
 

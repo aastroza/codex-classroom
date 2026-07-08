@@ -37,12 +37,6 @@ Install or repair the local skill only when the user asks for setup:
 codex-classroom voice install-skill
 ```
 
-Install the end-of-turn hook only when the user asks Codex to speak after every response:
-
-```sh
-codex-classroom voice install-hook
-```
-
 Inspect recorded thread context when the teacher asks what the voice knows:
 
 ```sh

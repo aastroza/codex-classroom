@@ -8,6 +8,7 @@ import {
   inferPhase,
   isDuplicateText,
   phasesForTask,
+  repairTextEncoding,
   type ClassroomMoment,
 } from "./classroom.js";
 import { maybeAutoNarrateMoment } from "./classroom-templates.js";
@@ -25,6 +26,19 @@ test("classifyTask detects research prompts in Spanish and English", () => {
   assert.equal(classifyTask("Busca noticias recientes del Mundial"), "research");
   assert.equal(classifyTask("search latest World Cup news"), "research");
   assert.equal(classifyTask("implementa una correccion del test"), "coding");
+});
+
+test("repairTextEncoding fixes mojibake before classroom projection", () => {
+  assert.equal(repairTextEncoding("EncontrÃ© informaciÃ³n de EspaÃ±a"), "Encontré información de España");
+
+  const mapper = createClassroomMapper();
+  const moments = mapper.ingest({
+    kind: "agent-message",
+    text: "EncontrÃ© informaciÃ³n de EspaÃ±a para revisar con la clase.",
+    at: "2026-07-07T00:00:00.000Z",
+  });
+
+  assert.match(moments[0]?.detail ?? "", /Encontré información de España/);
 });
 
 test("inferPhase advances through a research sequence", () => {
