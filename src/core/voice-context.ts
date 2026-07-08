@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { pathExists } from "./fs.js";
 
-export type VoiceContextSource = "cue" | "hook" | "manual";
+export type VoiceContextSource = "cue" | "manual" | "app-server" | "rollout";
 
 export interface VoiceContextEvent {
   schemaVersion: 1;
@@ -29,12 +29,6 @@ export interface VoiceContextInput {
   toolName?: string;
   command?: string;
   status?: string;
-}
-
-export interface HookContextInput {
-  eventName: string;
-  payload?: unknown;
-  cwd?: string;
 }
 
 const MAX_TEXT_LENGTH = 900;
@@ -116,158 +110,6 @@ export function buildThreadBrief(events: VoiceContextEvent[], limit = 12): strin
       return `- ${parts.join(" | ")}`;
     })
     .join("\n");
-}
-
-export function normalizeHookContext(input: HookContextInput): VoiceContextInput {
-  const payload = asRecord(input.payload);
-  const cwd = firstString(payload, ["cwd", "current_working_directory"]) ?? input.cwd;
-  const toolName = firstString(payload, ["tool_name", "toolName", "tool"]);
-  const toolInput = asRecord(payload.tool_input ?? payload.toolInput ?? payload.input);
-  const toolResponse = asRecord(payload.tool_response ?? payload.toolResponse ?? payload.response);
-  const command = firstString(toolInput, ["command", "cmd"]);
-  const prompt = firstString(payload, ["prompt", "user_prompt", "userPrompt", "message"]);
-  const status = inferStatus(payload, toolResponse);
-
-  if (input.eventName === "UserPromptSubmit") {
-    return {
-      source: "hook",
-      kind: "user-prompt",
-      title: "User submitted a prompt",
-      summary: prompt ? `Prompt: ${prompt}` : "A new user prompt started a turn.",
-      cwd,
-      status,
-    };
-  }
-
-  if (input.eventName === "PostToolUse") {
-    return {
-      source: "hook",
-      kind: "tool-result",
-      title: toolName ? `Tool finished: ${toolName}` : "Tool finished",
-      summary: summarizeToolResult(toolResponse, payload),
-      cwd,
-      toolName,
-      command,
-      status,
-    };
-  }
-
-  if (input.eventName === "Stop") {
-    return {
-      source: "hook",
-      kind: "turn-complete",
-      title: "Turn completed",
-      summary: "Codex finished the current response and is ready for the next instruction.",
-      cwd,
-      status,
-    };
-  }
-
-  return {
-    source: "hook",
-    kind: input.eventName,
-    title: `${input.eventName} hook`,
-    summary: summarizePayload(payload),
-    cwd,
-    toolName,
-    command,
-    status,
-  };
-}
-
-export async function readStdinText(): Promise<string> {
-  if (process.stdin.isTTY) {
-    return "";
-  }
-
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
-export function parseHookPayload(text: string): unknown {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return { text: trimmed };
-  }
-}
-
-function summarizeToolResult(toolResponse: Record<string, unknown>, payload: Record<string, unknown>): string {
-  const stderr = firstString(toolResponse, ["stderr", "error", "errorMessage"]);
-  const stdout = firstString(toolResponse, ["stdout", "output", "text"]);
-  const message = firstString(payload, ["message", "summary"]);
-  const exitCode = firstNumber(toolResponse, ["exit_code", "exitCode", "code"]);
-
-  if (stderr) {
-    return exitCode === undefined
-      ? `Tool reported: ${stderr}`
-      : `Tool exited with code ${exitCode}: ${stderr}`;
-  }
-
-  if (stdout) {
-    return `Tool output: ${stdout}`;
-  }
-
-  if (message) {
-    return message;
-  }
-
-  return exitCode === undefined ? "Tool finished." : `Tool finished with exit code ${exitCode}.`;
-}
-
-function summarizePayload(payload: Record<string, unknown>): string {
-  const summary = firstString(payload, ["summary", "message", "text"]);
-  if (summary) {
-    return summary;
-  }
-
-  const keys = Object.keys(payload);
-  return keys.length === 0 ? "Hook ran without a JSON payload." : `Hook payload keys: ${keys.slice(0, 8).join(", ")}.`;
-}
-
-function inferStatus(payload: Record<string, unknown>, toolResponse: Record<string, unknown>): string | undefined {
-  const explicit = firstString(payload, ["status", "state"]);
-  if (explicit) {
-    return explicit;
-  }
-
-  const exitCode = firstNumber(toolResponse, ["exit_code", "exitCode", "code"]);
-  if (exitCode === undefined) {
-    return undefined;
-  }
-  return exitCode === 0 ? "ok" : "failed";
-}
-
-function firstString(record: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) {
-      return truncateText(redactSecrets(value.trim()), MAX_TEXT_LENGTH);
-    }
-  }
-  return undefined;
-}
-
-function firstNumber(record: Record<string, unknown>, keys: string[]): number | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === "number") {
-      return value;
-    }
-  }
-  return undefined;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function redactSecrets(value: string): string {

@@ -1,5 +1,6 @@
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import fs from "node:fs/promises";
 
 import type { CommandContext } from "../types.js";
 import { CliError } from "../core/errors.js";
@@ -17,7 +18,9 @@ export async function enterCommand(context: CommandContext, args: string[]): Pro
 
   const existingSession = await readActiveSession(context.paths.classroomRoot);
   if (existingSession) {
-    throw new CliError(`A classroom session is already active for profile "${existingSession.profile}". Run restore first.`);
+    throw new CliError(
+      `A classroom session is already active for profile "${existingSession.profile}". Run codex-classroom restore, or codex-classroom rescue if restore fails.`,
+    );
   }
 
   const processes = await findCodexProcesses();
@@ -44,6 +47,14 @@ export async function enterCommand(context: CommandContext, args: string[]): Pro
     windowsSandboxMode: context.options.windowsSandboxMode ?? "inherit",
     dryRun: context.options.dryRun,
   });
+
+  if (context.options.profileFresh) {
+    if (!context.options.dryRun) {
+      await fs.rm(paths.desktopState, { recursive: true, force: true });
+      await fs.mkdir(paths.desktopState, { recursive: true });
+    }
+    context.output.info(`Reset classroom Desktop state for profile "${paths.profileName}".`);
+  }
 
   const session = createActiveSession({
     profile: paths.profileName,

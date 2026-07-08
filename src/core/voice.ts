@@ -1,16 +1,17 @@
 ﻿export const DEFAULT_VOICE_HOST = "127.0.0.1";
 export const DEFAULT_VOICE_PORT = 17321;
 export const DEFAULT_VOICE_MODEL = "gpt-realtime-2.1-mini";
-export const DEFAULT_VOICE_NAME = "marin";
+export const DEFAULT_VOICE_NAME = "verse";
 export const DEFAULT_VOICE_LANGUAGE = "Spanish";
 export const DEFAULT_VOICE_API_KEY_ENV = "OPENAI_API_KEY";
 
 export type VoiceCueKind =
-  | "note"
-  | "started"
-  | "changed"
-  | "blocked"
-  | "verified"
+  | "orientation"
+  | "method"
+  | "evidence"
+  | "decision"
+  | "risk"
+  | "wrap"
   | "pause"
   | "resume";
 
@@ -18,6 +19,7 @@ export interface VoiceCue {
   kind: VoiceCueKind;
   text: string;
   at: string;
+  source?: "manual" | "auto" | "cue";
 }
 
 export interface VoiceSessionOptions {
@@ -41,22 +43,28 @@ export function parsePort(value: string | undefined): number {
 
 export function parseCueKind(value: string | undefined): VoiceCueKind {
   if (value === undefined) {
-    return "note";
+    return "evidence";
   }
 
   if (
-    value === "note" ||
-    value === "started" ||
-    value === "changed" ||
-    value === "blocked" ||
-    value === "verified" ||
+    value === "orientation" ||
+    value === "method" ||
+    value === "evidence" ||
+    value === "decision" ||
+    value === "risk" ||
+    value === "wrap" ||
     value === "pause" ||
     value === "resume"
   ) {
     return value;
   }
 
-  throw new Error("--kind must be note, started, changed, blocked, verified, pause, or resume.");
+  if (value === "started") return "method";
+  if (value === "changed" || value === "note") return "evidence";
+  if (value === "blocked") return "risk";
+  if (value === "verified") return "wrap";
+
+  throw new Error("--kind must be orientation, method, evidence, decision, risk, wrap, pause, or resume.");
 }
 
 export function buildVoiceInstructions(language: string): string {
@@ -108,11 +116,12 @@ export function buildCuePrompt(cue: VoiceCue): string {
   }
 
   const labels: Record<Exclude<VoiceCueKind, "pause" | "resume">, string> = {
-    note: "Classroom note",
-    started: "Codex started work",
-    changed: "Codex changed something",
-    blocked: "Codex hit a blocker",
-    verified: "Codex verified the result",
+    orientation: "Classroom task",
+    method: "Codex method",
+    evidence: "Evidence for the class",
+    decision: "Codex decision",
+    risk: "Risk or blocker",
+    wrap: "Codex wrapped up",
   };
 
   return `${labels[cue.kind]}: ${cue.text}

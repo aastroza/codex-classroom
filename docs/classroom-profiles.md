@@ -79,6 +79,14 @@ Switch state without opening Codex Desktop:
 codex-classroom enter intro --no-launch
 ```
 
+Reset the profile Desktop state before entering:
+
+```sh
+codex-classroom enter intro --profile-fresh
+```
+
+Use this when you want the same named profile but want the Codex Desktop sidebar and first-run surfaces to feel fresh again.
+
 ## Commands
 
 ```text
@@ -126,6 +134,7 @@ Useful options:
 codex-classroom enter intro --yes
 codex-classroom enter intro --dry-run
 codex-classroom enter intro --no-launch
+codex-classroom enter intro --profile-fresh
 codex-classroom enter intro -- --enable some-feature
 ```
 
@@ -151,6 +160,8 @@ codex-classroom reset intro
 ```
 
 Use `rescue` if your machine shuts down during an active classroom session or a restore fails. Use `doctor` before class to check that the expected files and Codex executable are available.
+
+`status` shows whether a classroom session is active and, when active, how long it has been running.
 
 Most commands support `--json` for scripts.
 

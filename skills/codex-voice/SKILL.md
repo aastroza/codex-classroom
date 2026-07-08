@@ -7,9 +7,7 @@ description: "Use when teaching a live Codex class with Codex Voice: the user wa
 
 Codex Voice is a classroom sidecar. It lets Codex speak as itself while the teacher runs a live demo.
 
-Your job is to send first-person teaching beats that help students follow observable work.
-
-A teaching beat is a short spoken update at a meaningful transition. It tells the class what you are doing, why it matters, and what evidence or result to notice.
+Your job is not to narrate every step. Your job is to send a few first-person teaching beats that help students understand why the current work matters.
 
 ## Commands
 
@@ -25,22 +23,30 @@ Check local setup when the user asks why voice cues are not working:
 codex-classroom voice doctor
 ```
 
+Open the projection panel when the teacher wants a visual classroom view:
+
+```sh
+codex-classroom present
+```
+
+If the teacher already started `codex-classroom voice start` or `codex-classroom present`, do not start another sidecar. Send cues into the running sidecar as the thread progresses.
+
 Install or repair the local skill only when the user asks for setup:
 
 ```sh
 codex-classroom voice install-skill
 ```
 
-Install the end-of-turn hook only when the user asks Codex to speak after every response:
-
-```sh
-codex-classroom voice install-hook
-```
-
 Inspect recorded thread context when the teacher asks what the voice knows:
 
 ```sh
 codex-classroom voice context
+```
+
+Attach the sidecar to a specific thread when automatic detection is not enough:
+
+```sh
+codex-classroom voice attach <threadId>
 ```
 
 Send a cue:
@@ -58,58 +64,101 @@ codex-classroom voice resume
 
 Cue kinds:
 
-- `started`
-- `changed`
-- `blocked`
-- `verified`
-- `note`
+- `orientation`: name the task or frame the work.
+- `method`: explain the strategy.
+- `evidence`: point to a result, source, diff, or test outcome.
+- `decision`: explain a choice or change of direction.
+- `risk`: name a blocker, failure, or uncertainty.
+- `wrap`: close the loop with the useful result.
 
-## Teaching beat coverage
+Legacy aliases still work: `started` maps to `method`, `changed` and `note` map to `evidence`, `blocked` maps to `risk`, and `verified` maps to `wrap`.
 
-Before sending a cue, classify the moment.
+## Editorial Quota
 
-Send a cue for every teaching beat:
+Send at most 5 or 6 cues per task, and usually no more than one cue per kind.
 
-- `started`: you are beginning a new phase such as implementation or verification.
-- `changed`: you made or are about to make a user-visible change in behavior or teaching material.
-- `blocked`: an assumption failed, an API rejected a request, a command failed, a setup dependency is missing, or progress needs a decision.
-- `verified`: a check passed or failed, a manual test confirms behavior, a package/build result matters, or a commit/push completed.
-- `note`: the teacher asks you to explain, students should inspect evidence on screen, or you are switching strategy.
-
-Routine commands can stay silent when they do not change the story: simple file reads, directory listing, repeated retries, or mechanical formatting.
-
-Coverage criterion: every meaningful phase has at least one cue. If you work through several tool calls without speaking, send a `note` cue at the next transition that summarizes the progress.
-
-The cues also become classroom context for teacher questions. Make each cue useful as a future event: include the observable action, the reason it matters, and the evidence students should watch.
-
-## Cue Style
-
-Write cues as Codex speaking in first person.
-
-Use one sentence, or two short clauses. Include enough context for students who cannot read the screen quickly.
-
-Prefer this shape:
+Every cue must answer this question:
 
 ```text
-I am <doing X> because <class-relevant reason>; watch <evidence/result>.
+Why does this matter to someone who does not code?
 ```
 
-Keep private reasoning out of the cue. Explain observable strategy and evidence.
+The auto-narrator already covers phase transitions when you stay silent. Your cues are for judgment: decisions, evidence, risk, and the final meaning of the work.
 
-Good cues:
+Never narrate that you are using this skill or reading its instructions. Never repeat the meaning of your previous cue. Never include local paths.
+
+## Cue Examples
+
+Orientation:
 
 ```sh
-codex-classroom voice say started "I am checking the CLI command path before editing so the class can see where voice setup lives."
-codex-classroom voice say changed "I added install and doctor commands; watch how the skill now has a reproducible setup path."
-codex-classroom voice say blocked "The API rejected the response event shape, so I am simplifying it to the documented Realtime event."
-codex-classroom voice say verified "The TypeScript check and package dry run passed, so the shipped CLI includes the voice files."
+codex-classroom voice say orientation "I am turning the student's question into a concrete task so the class can follow what success will look like."
 ```
 
-Weak cues:
+Bad:
 
 ```sh
-codex-classroom voice say note "I am reading a file."
-codex-classroom voice say note "Here is the whole error output: ..."
+codex-classroom voice say orientation "Voy a usar la skill codex-voice porque la pediste explicitamente..."
+```
+
+Method:
+
+```sh
+codex-classroom voice say method "I am checking several current sources because recent news can change during the workshop."
+```
+
+Bad:
+
+```sh
+codex-classroom voice say method "I am reading a file."
+```
+
+Evidence:
+
+```sh
+codex-classroom voice say evidence "The failing test now gives us the useful clue: the bug is in the command path, not the UI."
+```
+
+Bad:
+
+```sh
+codex-classroom voice say evidence "Ya reuni fuentes recientes y estoy separando resultados cerrados..."
+```
+
+Decision:
+
+```sh
+codex-classroom voice say decision "I am switching to the rollout watcher because it matches what students can see in the Desktop app."
+```
+
+Bad:
+
+```sh
+codex-classroom voice say decision "I will try something else."
+```
+
+Risk:
+
+```sh
+codex-classroom voice say risk "The app-server cannot read this Desktop thread, so I am falling back to the local session log instead of stopping the class."
+```
+
+Bad:
+
+```sh
+codex-classroom voice say risk "There was an error."
+```
+
+Wrap:
+
+```sh
+codex-classroom voice say wrap "The checks passed, so the class can now test the new Present view with a replay instead of waiting for a live thread."
+```
+
+Bad:
+
+```sh
+codex-classroom voice say wrap "Done."
 ```
 
 ## Teacher Control
@@ -132,7 +181,7 @@ codex-classroom voice resume
 
 Voice cues are public classroom speech.
 
-Keep credentials, secrets, private account details, and long command output out of the cue. Summarize the outcome instead.
+Keep credentials, secrets, private account details, local paths, and long command output out of the cue. Summarize the outcome instead.
 
 ## Failure Handling
 
