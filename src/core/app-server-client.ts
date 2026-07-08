@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import { mapAppServerEvent, type MappedAppServerEvent } from "./event-mapper.js";
+import { createClassroomMapper, type ClassroomMapper } from "./classroom.js";
 
 export interface AppServerClientOptions {
   command?: string;
@@ -25,6 +26,7 @@ export class AppServerClient {
   private nextId = 1;
   private pending = new Map<number, PendingRequest>();
   private notificationHandlers = new Set<(event: MappedAppServerEvent) => void>();
+  private mapper: ClassroomMapper = createClassroomMapper();
 
   constructor(private readonly options: AppServerClientOptions = {}) {}
 
@@ -175,6 +177,10 @@ export class AppServerClient {
 
     const mapped = mapAppServerEvent(message);
     if (mapped) {
+      if (mapped.raw) {
+        const moments = this.mapper.ingest(mapped.raw);
+        mapped.moment = moments.at(-1);
+      }
       for (const handler of this.notificationHandlers) {
         handler(mapped);
       }

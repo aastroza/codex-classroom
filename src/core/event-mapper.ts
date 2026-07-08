@@ -1,5 +1,6 @@
 import type { VoiceCue } from "./voice.js";
 import type { VoiceContextInput } from "./voice-context.js";
+import type { ClassroomMoment, Phase, RawMappedEvent } from "./classroom.js";
 
 export interface PresentPlanStep {
   step: string;
@@ -16,6 +17,8 @@ export interface MappedAppServerEvent {
   context?: VoiceContextInput;
   cue?: VoiceCue;
   present?: PresentEvent;
+  raw?: RawMappedEvent;
+  moment?: ClassroomMoment;
 }
 
 export function mapThreadSnapshot(snapshot: unknown): PresentEvent[] {
@@ -73,6 +76,7 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
   if (method === "turn/plan/updated") {
     const plan = arrayValue(params.plan).map(normalizePlanStep).filter((step): step is PresentPlanStep => step !== null);
     const activeStep = plan.find((step) => step.status === "in_progress");
+    const phases = plan.map(planStepToPhase);
     return {
       context: {
         source: "app-server",
@@ -84,7 +88,7 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
       },
       cue: activeStep
         ? {
-            kind: "started",
+            kind: "method",
             text: `I am now working on: ${activeStep.step}`,
             at,
           }
@@ -94,6 +98,21 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
         steps: plan,
         explanation: stringValue(params.explanation) ?? null,
       },
+      raw: phases.length > 0 ? { kind: "plan", phases, at } : undefined,
+    };
+  }
+
+  if (method === "turn/started") {
+    return {
+      context: {
+        source: "app-server",
+        kind: "turn-started",
+        title: "Turn started",
+        summary: "Codex started working on a turn.",
+        at,
+        status: "running",
+      },
+      raw: { kind: "assistant-message", text: "Codex started working.", at },
     };
   }
 
@@ -112,7 +131,21 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
           status: "running",
         },
         present: { type: "command", command, status: "running" },
+        raw: { kind: "command-started", command, toolName: "commandExecution", at },
       };
+    }
+    if (item.type === "agentMessage") {
+      const text = compactText(stringValue(item.text) ?? "");
+      return text ? {
+        context: {
+          source: "app-server",
+          kind: "agent-message",
+          title: "Agent message",
+          summary: text,
+          at,
+        },
+        raw: { kind: "agent-message", text, at },
+      } : null;
     }
   }
 
@@ -135,7 +168,7 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
           status: failed ? "failed" : "ok",
         },
         cue: {
-          kind: failed ? "blocked" : "verified",
+          kind: failed ? "risk" : "wrap",
           text: failed ? `The command failed with exit code ${exitCode}: ${command}` : `The command passed: ${command}`,
           at,
         },
@@ -145,6 +178,7 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
           status: failed ? "failed" : "passed",
           exitCode,
         },
+        raw: { kind: "command-completed", command, toolName: "commandExecution", exitCode, at },
       };
     }
 
@@ -159,7 +193,23 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
           at,
           status: stringValue(item.status),
         },
+        raw: { kind: "file-change", filesChanged: changes.length, at },
       };
+    }
+
+    if (item.type === "agentMessage") {
+      const text = compactText(stringValue(item.text) ?? "");
+      return text ? {
+        context: {
+          source: "app-server",
+          kind: "agent-message",
+          title: "Agent message",
+          summary: text,
+          at,
+        },
+        present: { type: "subtitle", text },
+        raw: { kind: "agent-message", text, at },
+      } : null;
     }
   }
 
@@ -175,6 +225,7 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
         at,
       },
       present: { type: "diff", ...stats },
+      raw: { kind: "file-change", filesChanged: stats.filesChanged, at },
     };
   }
 
@@ -191,7 +242,7 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
         status,
       },
       cue: {
-        kind: status === "failed" ? "blocked" : "verified",
+        kind: status === "failed" ? "risk" : "wrap",
         text: status === "failed" ? "The turn ended with a failure." : "The turn is complete.",
         at,
       },
@@ -199,6 +250,22 @@ export function mapAppServerEvent(notification: unknown, now = new Date()): Mapp
         type: "subtitle",
         text: status === "failed" ? "Turn ended with a failure." : "Turn complete.",
       },
+      raw: { kind: "task-complete", at },
+    };
+  }
+
+  if (method === "model/safetyBuffering/updated" || method === "model/rerouted" || method === "model/verification") {
+    const reason = stringValue(params.reason) ?? stringValue(params.model) ?? method;
+    return {
+      context: {
+        source: "app-server",
+        kind: method,
+        title: "Model status",
+        summary: reason,
+        at,
+        status: "running",
+      },
+      raw: { kind: "dynamic-tool", toolName: method, status: "running", at },
     };
   }
 
@@ -262,10 +329,18 @@ function normalizePlanStep(value: unknown): PresentPlanStep | null {
   const record = asRecord(value);
   const step = stringValue(record.step);
   const status = stringValue(record.status);
-  if (!step || (status !== "pending" && status !== "in_progress" && status !== "completed")) {
+  if (!step || (status !== "pending" && status !== "in_progress" && status !== "inProgress" && status !== "completed")) {
     return null;
   }
-  return { step, status };
+  return { step, status: status === "inProgress" ? "in_progress" : status };
+}
+
+function planStepToPhase(step: PresentPlanStep): Phase {
+  return {
+    id: step.step.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "step",
+    label: step.step,
+    status: step.status === "completed" ? "done" : step.status === "in_progress" ? "active" : "pending",
+  };
 }
 
 function summarizePlan(plan: PresentPlanStep[]): string {

@@ -1,13 +1,21 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import type { PresentEvent, PresentPlanStep } from "./event-mapper.js";
+import {
+  createClassroomMapper,
+  parseVoiceSayCommand,
+  type ClassroomMapper,
+  type ClassroomMoment,
+  type PresentEvent,
+  type RawMappedEvent,
+} from "./classroom.js";
 import { pathExists } from "./fs.js";
 import type { VoiceContextInput } from "./voice-context.js";
 
 export interface RolloutMappedEvent {
   context?: VoiceContextInput;
   present?: PresentEvent;
+  moment?: ClassroomMoment;
 }
 
 export interface RolloutWatcherOptions {
@@ -24,6 +32,7 @@ interface WatchedFile {
 
 interface RolloutParserState {
   calls: Map<string, ToolCallInfo>;
+  mapper: ClassroomMapper;
 }
 
 interface ToolCallInfo {
@@ -183,7 +192,7 @@ export class RolloutWatcher {
 }
 
 export function createRolloutParserState(): RolloutParserState {
-  return { calls: new Map() };
+  return { calls: new Map(), mapper: createClassroomMapper() };
 }
 
 export function mapRolloutText(text: string, state = createRolloutParserState()): RolloutMappedEvent[] {
@@ -215,15 +224,21 @@ export function mapRolloutRecord(value: unknown, state = createRolloutParserStat
   const timestamp = stringValue(record.timestamp) ?? new Date().toISOString();
   const payload = asRecord(record.payload);
 
+  let raw: RawMappedEvent | null = null;
   if (record.type === "event_msg") {
-    return mapEventMessage(payload, timestamp);
+    raw = mapEventMessage(payload, timestamp);
   }
 
   if (record.type === "response_item") {
-    return mapResponseItem(payload, timestamp, state);
+    raw = mapResponseItem(payload, timestamp, state);
   }
 
-  return null;
+  if (!raw) {
+    return null;
+  }
+  const moments = state.mapper.ingest(raw);
+  const moment = moments.at(-1);
+  return toRolloutMappedEvent(raw, moment);
 }
 
 async function walkRolloutFiles(dir: string, files: Array<{ file: string; mtimeMs: number }>): Promise<void> {
@@ -273,42 +288,28 @@ async function readFirstLine(file: string): Promise<string> {
   }
 }
 
-function mapEventMessage(payload: Record<string, unknown>, at: string): RolloutMappedEvent | null {
+function mapEventMessage(payload: Record<string, unknown>, at: string): RawMappedEvent | null {
   const type = stringValue(payload.type);
   if (type === "agent_message") {
-    const text = compactText(stringValue(payload.message) ?? "");
+    const text = (stringValue(payload.message) ?? "").replace(/\s+/g, " ").trim();
     if (!text || isInternalText(text)) {
       return null;
     }
-    return {
-      context: {
-        source: "rollout",
-        kind: "agent-message",
-        title: "Codex message",
-        summary: text,
-        at,
-      },
-      present: { type: "subtitle", text },
-    };
+    return { kind: "agent-message", text, at };
   }
 
-  if (type === "task_started") {
-    return {
-      context: {
-        source: "rollout",
-        kind: "turn-started",
-        title: "Codex started working",
-        summary: "Codex started a new turn.",
-        at,
-      },
-      present: { type: "subtitle", text: "Codex started working." },
-    };
+  if (type === "web_search_end") {
+    return { kind: "web-search-end", query: webSearchQuery(payload), at };
+  }
+
+  if (type === "task_complete") {
+    return { kind: "task-complete", at };
   }
 
   return null;
 }
 
-function mapResponseItem(payload: Record<string, unknown>, at: string, state: RolloutParserState): RolloutMappedEvent | null {
+function mapResponseItem(payload: Record<string, unknown>, at: string, state: RolloutParserState): RawMappedEvent | null {
   const type = stringValue(payload.type);
   if (type === "function_call") {
     return mapFunctionCall(payload, at, state);
@@ -317,48 +318,31 @@ function mapResponseItem(payload: Record<string, unknown>, at: string, state: Ro
     return mapFunctionOutput(payload, at, state);
   }
   if (type === "message") {
-    const text = compactText(outputText(payload));
+    const role = stringValue(payload.role);
+    const rawText = outputText(payload);
+    const text = role === "user" ? compactText(rawText) : rawText.replace(/\s+/g, " ").trim();
     if (!text || isInternalText(text)) {
       return null;
     }
-    return {
-      context: {
-        source: "rollout",
-        kind: "assistant-message",
-        title: "Codex answered",
-        summary: text,
-        at,
-      },
-      present: { type: "subtitle", text },
-    };
+    return role === "user" ? { kind: "user-prompt", text, at } : { kind: "assistant-message", text, at };
+  }
+  if (type === "web_search_call") {
+    return { kind: "web-search-call", query: webSearchQuery(payload), at };
   }
   return null;
 }
 
-function mapFunctionCall(payload: Record<string, unknown>, at: string, state: RolloutParserState): RolloutMappedEvent | null {
+function mapFunctionCall(payload: Record<string, unknown>, at: string, state: RolloutParserState): RawMappedEvent | null {
   const name = stringValue(payload.name) ?? "tool";
   const callId = stringValue(payload.call_id) ?? stringValue(payload.id);
   const args = parseJsonObject(stringValue(payload.arguments) ?? "");
 
   if (name === "update_plan") {
-    const plan = arrayValue(args.plan).map(normalizePlanStep).filter((step): step is PresentPlanStep => step !== null);
+    const plan = arrayValue(args.plan).map(normalizePlanStep).filter((step): step is { id: string; label: string; status: "pending" | "active" | "done" } => step !== null);
     if (plan.length === 0) {
       return null;
     }
-    return {
-      context: {
-        source: "rollout",
-        kind: "plan",
-        title: "Plan updated",
-        summary: summarizePlan(plan),
-        at,
-      },
-      present: {
-        type: "plan",
-        steps: plan,
-        explanation: stringValue(args.explanation) ?? null,
-      },
-    };
+    return { kind: "plan", phases: plan, at };
   }
 
   const command = displayToolCall(name, args);
@@ -366,22 +350,12 @@ function mapFunctionCall(payload: Record<string, unknown>, at: string, state: Ro
     state.calls.set(callId, { name, command });
   }
 
-  return {
-    context: {
-      source: "rollout",
-      kind: name === "exec_command" ? "command-started" : "tool-started",
-      title: name === "exec_command" ? "Command started" : `Tool started: ${name}`,
-      summary: command,
-      command: name === "exec_command" ? command : undefined,
-      toolName: name,
-      status: "running",
-      at,
-    },
-    present: { type: "command", command, status: "running" },
-  };
+  return name === "exec_command"
+    ? { kind: "command-started", command, toolName: name, at }
+    : { kind: "dynamic-tool", toolName: name, status: "running", at };
 }
 
-function mapFunctionOutput(payload: Record<string, unknown>, at: string, state: RolloutParserState): RolloutMappedEvent | null {
+function mapFunctionOutput(payload: Record<string, unknown>, at: string, state: RolloutParserState): RawMappedEvent | null {
   const callId = stringValue(payload.call_id);
   const call = callId ? state.calls.get(callId) : undefined;
   if (!call) {
@@ -391,24 +365,9 @@ function mapFunctionOutput(payload: Record<string, unknown>, at: string, state: 
   const output = stringValue(payload.output) ?? "";
   const exitCode = inferExitCode(output);
   const failed = exitCode !== null && exitCode !== 0;
-  return {
-    context: {
-      source: "rollout",
-      kind: call.name === "exec_command" ? "command-completed" : "tool-completed",
-      title: failed ? "Command failed" : "Tool completed",
-      summary: failed ? `${call.command} failed with exit code ${exitCode}.` : `${call.command} completed.`,
-      command: call.name === "exec_command" ? call.command : undefined,
-      toolName: call.name,
-      status: failed ? "failed" : "ok",
-      at,
-    },
-    present: {
-      type: "command",
-      command: call.command,
-      status: failed ? "failed" : "passed",
-      exitCode,
-    },
-  };
+  return call.name === "exec_command"
+    ? { kind: "command-completed", command: call.command, toolName: call.name, exitCode, at }
+    : { kind: "dynamic-tool", toolName: call.name, status: failed ? "failed" : "done", at };
 }
 
 function displayToolCall(name: string, args: Record<string, unknown>): string {
@@ -442,19 +401,18 @@ function inferExitCode(output: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
-function normalizePlanStep(value: unknown): PresentPlanStep | null {
+function normalizePlanStep(value: unknown): { id: string; label: string; status: "pending" | "active" | "done" } | null {
   const record = asRecord(value);
   const step = stringValue(record.step);
   const status = stringValue(record.status);
-  if (!step || (status !== "pending" && status !== "in_progress" && status !== "completed")) {
+  if (!step || (status !== "pending" && status !== "in_progress" && status !== "completed" && status !== "inProgress")) {
     return null;
   }
-  return { step, status };
-}
-
-function summarizePlan(plan: PresentPlanStep[]): string {
-  const active = plan.find((step) => step.status === "in_progress");
-  return active ? `Working on: ${active.step}` : plan.map((step) => step.step).join("; ");
+  return {
+    id: step.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "step",
+    label: step,
+    status: status === "completed" ? "done" : status === "in_progress" || status === "inProgress" ? "active" : "pending",
+  };
 }
 
 function parseJsonObject(text: string): Record<string, unknown> {
@@ -498,4 +456,51 @@ function stringValue(value: unknown): string | undefined {
 
 function arrayValue(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function webSearchQuery(payload: Record<string, unknown>): string | undefined {
+  const action = asRecord(payload.action);
+  return stringValue(payload.query) ?? stringValue(action.query) ?? stringValue(action.url);
+}
+
+function toRolloutMappedEvent(raw: RawMappedEvent, moment: ClassroomMoment | undefined): RolloutMappedEvent | null {
+  if (!moment) {
+    return null;
+  }
+  const context: VoiceContextInput = {
+    source: "rollout",
+    kind: raw.kind,
+    title: moment.title,
+    summary: moment.internal ?? moment.detail,
+    at: moment.at,
+    command: raw.kind === "command-started" || raw.kind === "command-completed" ? raw.command : undefined,
+    toolName: raw.kind === "dynamic-tool" ? raw.toolName : undefined,
+    status: moment.status,
+  };
+  return {
+    context,
+    moment,
+    present: legacyPresentFromMoment(moment),
+  };
+}
+
+function legacyPresentFromMoment(moment: ClassroomMoment): PresentEvent {
+  if (moment.type === "tool") {
+    return {
+      type: "command",
+      command: moment.internal ?? moment.detail,
+      status: moment.status === "failed" ? "failed" : moment.status === "done" ? "passed" : "running",
+    };
+  }
+  if (moment.type === "method" && moment.momentId === "plan-real" && moment.phases) {
+    return {
+      type: "plan",
+      explanation: null,
+      steps: moment.phases.map((phase) => ({
+        step: phase.label,
+        status: phase.status === "active" ? "in_progress" : phase.status === "done" ? "completed" : "pending",
+      })),
+    };
+  }
+  return { type: "subtitle", text: moment.detail };
 }

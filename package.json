@@ -20,6 +20,7 @@
     "build": "npm run clean && tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "replay": "tsx src/tools/replay.ts",
     "dev": "tsx src/cli.ts",
     "prepare": "npm run build"
   },

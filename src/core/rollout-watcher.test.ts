@@ -52,7 +52,7 @@ test("mapRolloutRecord maps command calls and outputs", () => {
   }, state);
 
   assert.deepEqual(started?.present, { type: "command", command: "npm test", status: "running" });
-  assert.deepEqual(completed?.present, { type: "command", command: "npm test", status: "passed", exitCode: 0 });
+  assert.deepEqual(completed?.present, { type: "command", command: "npm test", status: "passed" });
 });
 
 test("mapRolloutRecord maps Codex commentary into subtitles", () => {
@@ -65,9 +65,7 @@ test("mapRolloutRecord maps Codex commentary into subtitles", () => {
     },
   });
 
-  assert.deepEqual(mapped?.present, {
-    type: "subtitle",
-    text: "I am checking the failing test before editing the code.",
-  });
+  assert.equal(mapped?.present?.type, "subtitle");
+  assert.match(mapped?.moment?.detail ?? "", /failing test/);
   assert.equal(mapped?.context?.source, "rollout");
 });

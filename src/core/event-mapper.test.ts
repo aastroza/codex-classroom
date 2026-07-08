@@ -17,7 +17,7 @@ test("mapAppServerEvent creates cue and present event for active plan step", () 
     },
   }, now);
 
-  assert.equal(mapped?.cue?.kind, "started");
+  assert.equal(mapped?.cue?.kind, "method");
   assert.equal(mapped?.cue?.text, "I am now working on: Run tests");
   assert.deepEqual(mapped?.present, {
     type: "plan",
@@ -41,7 +41,7 @@ test("mapAppServerEvent maps failed command completion", () => {
     },
   }, now);
 
-  assert.equal(mapped?.cue?.kind, "blocked");
+  assert.equal(mapped?.cue?.kind, "risk");
   assert.equal(mapped?.context?.status, "failed");
   assert.deepEqual(mapped?.present, {
     type: "command",
