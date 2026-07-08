@@ -17,8 +17,9 @@ test("parsePort uses the default and validates user input", () => {
 });
 
 test("parseCueKind validates supported voice cue kinds", () => {
-  assert.equal(parseCueKind(undefined), "note");
-  assert.equal(parseCueKind("verified"), "verified");
+  assert.equal(parseCueKind(undefined), "evidence");
+  assert.equal(parseCueKind("wrap"), "wrap");
+  assert.equal(parseCueKind("verified"), "wrap");
   assert.throws(() => parseCueKind("other"));
 });
 
@@ -38,7 +39,7 @@ test("buildRealtimeSessionConfig keeps the realtime model configuration compact"
 test("buildCuePrompt maps control cues to Codex Voice behavior", () => {
   assert.match(buildCuePrompt({ kind: "pause", text: "", at: new Date().toISOString() }), /Pause/);
   assert.match(
-    buildCuePrompt({ kind: "changed", text: "Updated README", at: new Date().toISOString() }),
-    /Codex changed something/,
+    buildCuePrompt({ kind: "evidence", text: "Updated README", at: new Date().toISOString() }),
+    /Evidence/,
   );
 });

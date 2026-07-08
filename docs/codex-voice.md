@@ -12,7 +12,7 @@ Codex Voice has three parts:
 
 - the `codex-classroom` CLI, which runs a local sidecar
 - the `codex-voice` skill, which decides when a cue is worth sending
-- a context bridge, which watches Codex Desktop sessions and uses Codex app-server when available
+- a classroom semantic layer, which turns raw Codex events into phases, moments, and compact context
 
 The sidecar opens a browser page. The browser handles microphone capture, audio playback, and the Realtime session. The OpenAI API key stays on the local server side.
 
@@ -22,7 +22,7 @@ The normal teaching flow is:
 2. Open or create a normal Codex Desktop thread.
 3. Ask Codex to use `$codex-voice`.
 
-The sidecar watches Codex Desktop `rollout-*.jsonl` session files, so it can follow threads created in the app after the sidecar starts. It also uses `codex app-server` events when that connection can attach to a thread.
+The sidecar watches Codex Desktop `rollout-*.jsonl` session files, so it can follow threads created in the app after the sidecar starts. It also uses `codex app-server` events when that connection can attach to a thread. If app-server cannot read Desktop-created rollouts on the installed Codex version, the sidecar disables that source for the session and keeps using Desktop session files.
 
 Hooks are still available as an extra fallback for older setups:
 
@@ -33,9 +33,9 @@ codex-classroom voice start --context-source both
 
 Codex can then send cues such as:
 
-- "I am checking why the test failed."
-- "I changed strategy because the config path was wrong."
-- "This is a good moment to inspect the diff."
+- "I am checking several sources because current news can change during class."
+- "I am switching strategy because the app-server cannot read this Desktop thread."
+- "The failing test shows the useful clue: the bug is in the command path."
 
 The teacher can also ask:
 
@@ -84,6 +84,8 @@ codex-classroom voice start --language English
 codex-classroom voice start --voice marin
 codex-classroom voice start --model gpt-realtime-2.1-mini
 codex-classroom voice start --no-open
+codex-classroom voice start --replay src/core/fixtures/rollout-world-cup-news.jsonl
+codex-classroom voice start --no-auto-narrate
 ```
 
 Open a projector-friendly visual panel without starting audio:
@@ -92,12 +94,18 @@ Open a projector-friendly visual panel without starting audio:
 codex-classroom present
 ```
 
-`present` can run without `OPENAI_API_KEY`. It shows plan, command, and cue updates from the same local sidecar.
+`present` can run without `OPENAI_API_KEY`. It shows the current classroom task, inferred or real phases, the current moment, recent evidence, and the latest subtitle from the same local sidecar.
 
 To open a finished or already-running thread in the panel, pass its thread id:
 
 ```sh
 codex-classroom present <threadId>
+```
+
+Replay a saved rollout into Present for a demo or regression check:
+
+```sh
+codex-classroom present --replay src/core/fixtures/rollout-world-cup-news.jsonl
 ```
 
 ## Send cues manually
@@ -111,10 +119,12 @@ codex-classroom voice say "I found the failing test and I am narrowing the fix."
 Send a typed cue:
 
 ```sh
-codex-classroom voice say started "I am reading the repository before editing."
-codex-classroom voice say changed "I updated the README and added a focused test."
-codex-classroom voice say blocked "I cannot verify audio without a configured OpenAI credential."
-codex-classroom voice say verified "TypeScript and tests passed."
+codex-classroom voice say orientation "I am framing the task so the class can see what success means."
+codex-classroom voice say method "I am checking several current sources because one headline is not enough."
+codex-classroom voice say evidence "The failing test now points to the command path, not the UI."
+codex-classroom voice say decision "I am switching to the rollout watcher because it matches what the Desktop app records."
+codex-classroom voice say risk "The app-server cannot read this Desktop thread, so I am falling back without stopping the class."
+codex-classroom voice say wrap "The checks passed, so the class can try the replayable Present view."
 ```
 
 Pause or resume:
@@ -144,14 +154,14 @@ The skill assumes the sidecar is already running. It should send cues with `code
 
 Good cues are short teaching beats:
 
-- the intent before a multi-step change
-- why a strategy changed
-- the result of a failing or passing test
-- a meaningful file or behavior change
-- a blocker worth explaining out loud
-- evidence students should inspect on screen
+- `orientation`: frame the task
+- `method`: explain the strategy
+- `evidence`: point to a source, diff, or test outcome
+- `decision`: explain a choice
+- `risk`: name a blocker or uncertainty
+- `wrap`: close with the useful result
 
-Avoid cues for secrets, credentials, long terminal output, obvious file reads, or every small command in a loop.
+Aim for at most 5 or 6 cues per task. Avoid cues for secrets, credentials, local paths, long terminal output, obvious file reads, or every small command in a loop. If Codex stays silent, the auto-narrator can speak sparse phase changes; explicit cues should add judgment, not coverage.
 
 ## Add thread context
 
@@ -164,10 +174,11 @@ The Desktop session watcher is what makes this flow work reliably: start `codex-
 
 The context bridge maps local thread activity into compact classroom context:
 
-- plan updates
-- command starts and completions
-- meaningful failures or successful checks
-- turn completion
+- user task orientation
+- search and tool activity
+- inferred or real phases
+- meaningful failures and checks
+- final wrap moments
 
 Run doctor to verify app-server support:
 
@@ -228,9 +239,11 @@ codex-classroom present
 
 It opens `/present`, a focused classroom view with:
 
-- the current plan
-- the current command
-- the latest cue as a subtitle
+- the classroom task
+- the current phase list
+- the current teaching moment
+- recent evidence
+- the latest spoken cue or wrap as a subtitle
 
 Pass a thread id when you want the panel to hydrate from stored thread history before listening for new updates:
 
